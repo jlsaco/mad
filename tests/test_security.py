@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app import ProviderResponse
-from tests.conftest import FakeProvider
+from mad.providers.base import ProviderResponse
+from mad.providers.fake import FakeScriptedProvider as FakeProvider
 
 
 # ---------------------------------------------------------------------------

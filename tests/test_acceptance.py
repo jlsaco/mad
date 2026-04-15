@@ -25,8 +25,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app import ProviderResponse, ToolUse
-from tests.conftest import FakeProvider
+from mad.providers.base import ProviderResponse, ToolUse
+from mad.providers.fake import FakeScriptedProvider as FakeProvider
 
 # ---------------------------------------------------------------------------
 # AC-1: POST /v1/sessions with a GitHub repo → repo cloned in workspace

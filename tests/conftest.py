@@ -1,44 +1,27 @@
 from __future__ import annotations
 
 import subprocess
-from collections import deque
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-import app as app_module
-from app import LLMProvider, ProviderResponse
-
-
-class FakeProvider:
-    def __init__(self) -> None:
-        self._queue: deque[ProviderResponse] = deque()
-
-    def script(self, responses: list[ProviderResponse]) -> None:
-        self._queue = deque(responses)
-
-    async def complete(
-        self,
-        system: str,
-        messages: list[dict],
-        tools: list[dict],
-    ) -> ProviderResponse:
-        if not self._queue:
-            return ProviderResponse(text="(fake provider exhausted)", stop_reason="end_turn")
-        return self._queue.popleft()
+from mad.api.app import create_app
+from mad.providers import factory
+from mad.providers.base import LLMProvider, ProviderResponse  # re-exported for tests
+from mad.providers.fake import FakeScriptedProvider
 
 
 @pytest.fixture
-def fake_provider(monkeypatch: pytest.MonkeyPatch) -> FakeProvider:
-    provider = FakeProvider()
-    monkeypatch.setattr(app_module, "get_provider", lambda name: provider)
+def fake_provider(monkeypatch: pytest.MonkeyPatch) -> FakeScriptedProvider:
+    provider = FakeScriptedProvider()
+    monkeypatch.setattr(factory, "get_provider", lambda name: provider)
     return provider
 
 
 @pytest.fixture
-def client(fake_provider: FakeProvider) -> TestClient:
-    return TestClient(app_module.app)
+def client(fake_provider: FakeScriptedProvider) -> TestClient:
+    return TestClient(create_app())
 
 
 @pytest.fixture
@@ -50,11 +33,7 @@ def tmp_workspace(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def bare_repo(tmp_path: Path) -> Path:
-    """A local git bare repo with one commit on `main`. Use as a clone source.
-
-    Returns a file:// path the test can pass as `resources[].url` so tests
-    never touch real GitHub.
-    """
+    """A local git bare repo with one commit on `main`. Use as a clone source."""
     seed = tmp_path / "seed"
     seed.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True)
