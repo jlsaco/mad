@@ -25,7 +25,7 @@ Mad does NOT install per-session packages. Anything the agent needs inside the w
 
 1. **FastAPI + uvicorn.** FastAPI as the framework, uvicorn to serve.
 
-2. **One `app.py` file for the MVP.** Don't over-structure yet. The three components (session log, sandbox, harness) can be classes/functions inside the same file or split into simple sibling modules — but not before it hurts.
+2. **Package layout under `src/mad/`.** Code is split by concern: `mad.api` (FastAPI app + routes), `mad.core` (session log, workspace, security, `SessionStore`), `mad.agent` (harness loop + tools), `mad.providers` (LLMProvider implementations). No module-level mutable globals — per-process state lives on a `SessionStore` injected via `create_app(store=...)`. The project stays `pip install -e .` compatible.
 
 3. **Path mapping.** A `mount_path` like `/workspace/backend` is mapped to a subdirectory of the session workspace (e.g. `{workspace_dir}/workspace_backend`). Absolute paths that would escape the workspace MUST be rejected (path traversal prevention).
 

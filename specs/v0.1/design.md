@@ -6,7 +6,7 @@ Mad is split into three decoupled components that together turn a JSON request i
 
 ```
 ┌─────────────┐    POST /v1/sessions    ┌──────────────────────┐
-│   Client    │ ───────────────────────▶│   FastAPI (app.py)   │
+│   Client    │ ───────────────────────▶│  FastAPI (mad.api)   │
 │             │◀─── SSE stream ─────────│                      │
 └─────────────┘                         └──────┬───────────────┘
                                                │

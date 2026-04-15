@@ -19,7 +19,7 @@ Given a spec path, produce a report with four sections:
    - Any token string stored past the clone? (fail)
    - Any `mount_path` used without traversal validation? (fail)
    - Any LLM call bypassing `LLMProvider`? (fail)
-   - Any new module outside `app.py` without spec justification? (warn)
+   - Any new code that breaks the `src/mad/` package layout (e.g. files dropped at repo root, business logic in `api/`, module-level mutable globals instead of `SessionStore`, or anything that breaks `pip install -e .`)? (warn)
 4. **Risks and loose ends** — anything that is technically passing but smells wrong.
 
 ## How to work

@@ -47,7 +47,7 @@ Tool calls MUST use Anthropic's native structured tool use (SDK `tools=[...]` wi
 
 ## Non-functional constraints
 
-- **NFR-1 — Single-file MVP.** The three core components (session log, sandbox, harness) live inside one `app.py` (or very simple modules alongside it). No premature structuring.
+- **NFR-1 — Package layout.** Core logic lives in the `mad` package under `src/mad/`, split by concern: `mad.api` (FastAPI app + routes), `mad.core` (session log, workspace, security), `mad.agent` (harness loop + tools), `mad.providers` (`LLMProvider` implementations). No module-level mutable globals — state is held on a `SessionStore` injected via `create_app(store=...)`. The project stays `pip install -e .` compatible.
 - **NFR-2 — Token hygiene.** GitHub tokens are used to clone and then stripped from the remote. They are never persisted to the workspace.
 - **NFR-3 — Dual logging.** Every action is printed to stdout AND appended to the session log. The log is the source of truth.
 - **NFR-4 — Environment preparation is out of scope.** The operator prepares the server's Python environment manually (`python -m venv .venv && pip install -r requirements.txt`). Mad does NOT install per-session packages. Any dependency the agent needs inside the workspace must already be available on the host, or the agent installs it as part of its work.

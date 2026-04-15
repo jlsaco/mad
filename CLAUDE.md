@@ -29,7 +29,13 @@ The 4 subagents live in `.claude/agents/`. The 3 slash commands live in `.claude
 
 3. **Path traversal prevention.** `mount_path` values from requests are mapped to subdirectories of the session workspace. Absolute paths that would escape the workspace MUST be rejected before any filesystem operation.
 
-4. **Single-file MVP.** Core logic (session log, sandbox, harness) lives in `app.py`. Don't split into packages until it hurts.
+4. **Package layout.** Core logic lives in the `mad` package under `src/mad/`, split by concern:
+   - `mad.api` — FastAPI app + routers. Thin HTTP layer only: parse, validate, delegate. Exposes `create_app(store=...)` as a factory.
+   - `mad.core` — pure domain. Session registry, JSONL session log (hard rule 6), workspace management, path validation (hard rule 3), token hygiene (hard rule 2). No FastAPI imports here.
+   - `mad.agent` — harness loop and tool execution.
+   - `mad.providers` — `LLMProvider` Protocol, `get_provider` factory, and one module per implementation (`claude_cli`, `anthropic_api`, `fake`).
+
+   No module-level mutable globals. Session registries, SSE queues, and idempotency maps live on a `SessionStore` injected into `create_app()` so every test builds its own isolated instance. The project MUST remain `pip install -e .` compatible at all times — `pyproject.toml` owns package metadata, dependencies, and the `mad` console script.
 
 5. **Fake provider in tests.** Tests NEVER hit the real Anthropic API, the `claude` CLI, or GitHub. They use the `fake_scripted` implementation of `LLMProvider` and local bare repos. CI has no secrets.
 
@@ -60,12 +66,15 @@ If the state is NOT stable, do not commit. Report what blocks stability and leav
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e .                  # install the `mad` package in editable mode
 
 # Run the test suite
 pytest -q
 
-# Run the server locally
-uvicorn app:app --host 0.0.0.0 --port 8000
+# Run the server locally (factory mode — create_app() builds a fresh app)
+uvicorn mad.api.app:create_app --factory --host 0.0.0.0 --port 8000
+# …or via the console script declared in pyproject.toml
+mad serve
 ```
 
 ## Key files
@@ -73,8 +82,12 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 - `specs/v0.1/` — spec-driven package for the current milestone.
 - `docs/backlog.md` — improvements deferred past v0.1.
 - `docs/sandbox-bwrap.md` — operator's guide for hardening the sandbox with bubblewrap.
-- `app.py` — the MVP implementation (stubbed until `/implement` runs).
-- `tests/conftest.py` — shared fixtures, including `fake_provider` and `bare_repo`.
+- `pyproject.toml` — package metadata, dependencies, build backend, and the `mad` console script. Single source of truth for `pip install -e .`.
+- `src/mad/api/app.py` — `create_app(store=...)` factory and router wiring.
+- `src/mad/core/` — session log, workspace, security primitives (hard rules 2, 3, 6 enforced here).
+- `src/mad/agent/` — harness loop and tool execution.
+- `src/mad/providers/` — `LLMProvider` protocol, factory, and implementations (`claude_cli`, `anthropic_api`, `fake`).
+- `tests/conftest.py` — shared fixtures, including `fake_provider` (built on `mad.providers.fake`) and `bare_repo`. Unit tests live under `tests/unit/`, FR acceptance tests under `tests/acceptance/`.
 
 ## LLMProvider contract
 
@@ -95,4 +108,4 @@ class LLMProvider(Protocol):
 - `anthropic_api` — Anthropic SDK.
 - `fake_scripted` — test double that replays a pre-recorded sequence.
 
-The factory `get_provider(agent.provider)` is monkey-patched to `fake_scripted` in tests.
+The protocol and `ProviderResponse` / `ToolUse` dataclasses live in `mad.providers.base`. The factory `mad.providers.factory.get_provider(agent.provider)` dispatches by name and is monkey-patched to `fake_scripted` (from `mad.providers.fake`) in tests.

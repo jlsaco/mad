@@ -21,7 +21,7 @@ Given a feature name and a short description of intent, you create or update a f
 ## How to work
 
 1. **Read `specs/v0.1/` first.** Match its tone, structure, and naming conventions. Use the same FR-1/FR-2… and NFR-1/NFR-2… numbering style. Use English.
-2. **Read `CLAUDE.md`** so every requirement respects the hard rules (native tool use, token hygiene, path traversal, single-file MVP, fake provider in tests, session log as source of truth).
+2. **Read `CLAUDE.md`** so every requirement respects the hard rules (native tool use, token hygiene, path traversal, `src/mad/` package layout with `create_app(store=...)` and no module-level globals, fake provider in tests, session log as source of truth).
 3. **Read `docs/backlog.md`** so you can explicitly mark items that belong there instead of dragging them into scope.
 4. **Never invent requirements the user didn't ask for.** If the intent is ambiguous, stop and ask clarifying questions before writing.
 5. **Acceptance criteria must be testable.** Each MVP acceptance item should map cleanly to a pytest test. If you can't imagine the test, rewrite the criterion.

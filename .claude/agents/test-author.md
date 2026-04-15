@@ -18,7 +18,7 @@ Given a spec path (e.g. `specs/v0.1/`), read `requirements.md` and produce pytes
 2. **Read `CLAUDE.md`** to align with hard rules. Tests MUST use the `fake_provider` fixture and local `bare_repo` fixtures from `tests/conftest.py`. Tests MUST NOT hit the real Anthropic API, the real `claude` CLI, or GitHub.
 3. **Read `tests/conftest.py`** to learn the available fixtures before writing new tests. Reuse existing fixtures; do not duplicate them.
 4. **One test per acceptance criterion, named clearly.** Use names like `test_mvp_01_create_session_clones_repo` so the mapping to `requirements.md` is obvious.
-5. **Tests MUST fail initially** — they call into `app.py` endpoints that don't exist yet. That is the desired red state for TDD.
+5. **Tests MUST fail initially** — they call into `mad` package endpoints / functions that don't exist yet. That is the desired red state for TDD. Import production code from `mad.*` (e.g. `from mad.providers.base import ProviderResponse`), never from a top-level `app` module.
 6. **Cover the hard rules explicitly.** Path traversal and token hygiene belong in `tests/test_security.py`, not mixed with acceptance tests.
 
 ## Fixture contracts you can rely on
@@ -32,7 +32,7 @@ If a fixture you need doesn't exist, ADD it to `conftest.py` rather than working
 
 ## What you MUST NOT do
 
-- Do not write any production code (`app.py` or anything outside `tests/`).
+- Do not write any production code (anything under `src/mad/` or outside `tests/`).
 - Do not make tests pass by weakening assertions. If an assertion is hard to write, the spec probably has a gap — flag it.
 - Do not use real network calls, real tokens, or real GitHub URLs.
 
