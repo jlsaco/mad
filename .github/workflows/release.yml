@@ -3,14 +3,46 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      manual_publish:
+        description: "Build current tree and publish to PyPI (skips semantic-release)"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  manual-publish-pypi:
+    name: Manual publish to PyPI
+    if: github.event_name == 'workflow_dispatch' && inputs.manual_publish
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mad-bros
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
   release:
     name: Semantic release
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
