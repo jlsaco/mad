@@ -2,7 +2,7 @@
 
 ## Overview
 
-Mad is split into three decoupled components that together turn a JSON request into a running autonomous Claude session.
+Mad is split into two decoupled components that together turn a JSON request into a running external agent session.
 
 ```
 ┌─────────────┐    POST /v1/sessions    ┌──────────────────────┐
@@ -10,12 +10,12 @@ Mad is split into three decoupled components that together turn a JSON request i
 │             │◀─── SSE stream ─────────│                      │
 └─────────────┘                         └──────┬───────────────┘
                                                │
-                              ┌────────────────┼────────────────┐
-                              ▼                ▼                ▼
-                      ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-                      │ Session Log  │ │   Sandbox    │ │   Harness    │
-                      │ (the memory) │ │ (the hands)  │ │ (the brain)  │
-                      └──────────────┘ └──────────────┘ └──────────────┘
+                                  ┌────────────┴────────────┐
+                                  ▼                         ▼
+                          ┌──────────────┐         ┌──────────────┐
+                          │ Session Log  │         │   Launcher   │
+                          │ (the memory) │         │ (hands-off)  │
+                          └──────────────┘         └──────────────┘
 ```
 
 ## Components
@@ -25,28 +25,21 @@ Mad is split into three decoupled components that together turn a JSON request i
 - One JSONL file per session at `./sessions/{session_id}.jsonl`.
 - Append-only: each event is one JSON line.
 - Public functions:
-  - `create_session() -> session_id`
-  - `emit(session_id, event_type, data)`
-  - `get_events(session_id) -> list[event]`
-- If the process crashes, a new instance reads the file and resumes from the last event. The log is the source of truth.
+  - `emit(session_id, event_type, data)` — writes to disk and stdout simultaneously.
+  - `get_events(session_id) -> list[event]` — reads all events from the JSONL file.
+- The log is the source of truth. If the process crashes, the history up to that point is preserved.
 
-### 2. Sandbox — the hands
+### 2. Launcher — hands-off
 
-- One temporary directory per session at `/tmp/mad_{session_id}/`.
-- Repositories are cloned here following their `mount_path` mapping (see `api.md`).
-- Exposes a single interface: `execute(tool_name, input) -> string`.
-- Tools available to the agent: `bash`, `read`, `write`, `edit`, `glob`, `grep`.
-- GitHub tokens are used to clone and then stripped from the remote: `git remote set-url origin {url_without_token}`. Tokens never touch the workspace on disk.
+Spawns the external agent process inside the session workspace and streams its output.
 
-### 3. Harness — the brain
-
-The agent loop: call Claude → read structured response → execute tools → record events → repeat.
-
-- **Stateless.** If it crashes, a new harness reads the session log and resumes.
-- Supports two providers:
-  - `claude_cli`: runs `claude --print --output-format stream-json` as a subprocess. For Pro/Max accounts.
-  - `anthropic_api`: calls the Anthropic SDK directly. For pay-per-token usage.
-- Runs in the background (asyncio task) after the first `user.message` is received. Does not block the HTTP endpoint.
+- The launcher receives: the prompt (from `user.message`), the workspace path, and an `emit` callback.
+- It spawns the external agent (e.g. `claude --dangerously-skip-permissions -p "{prompt}"`) with `cwd` set to the workspace.
+- It reads stdout line-by-line and calls `emit("agent.output", {"line": ...})` for each.
+- On exit code 0: calls `emit("session.status_idle", {"stop_reason": "end_turn"})`.
+- On non-zero exit or timeout: calls `emit("session.error", {"error": ...})`.
+- The launcher never sees tool calls, never executes bash commands, and never manages a conversation loop. The external agent handles all of that internally.
+- Runs in the background (asyncio task) after the first `user.message`. Does not block the HTTP endpoint.
 
 ## End-to-end request flow
 
@@ -56,19 +49,14 @@ The agent loop: call Claude → read structured response → execute tools → r
 3. session_id is generated and the session log is created
 4. Temporary workspace directory is created
 5. For each resource:
-   - If type=github_repository: git clone with the token, to the mapped mount_path
+   - If type=github_repository: git clone with the token, to the mapped mount_path.
+     Token is stripped from the remote immediately after clone.
    - If type=file: content is written to the mapped mount_path
 6. Response: session_id + status "created" + resources_mounted
-7. Client sends POST /events with a user.message to start the agent
-8. Harness enters the agent loop:
-   a. Build the prompt (system + workspace info + tool definitions + message)
-   b. Call Claude (CLI or API) declaring the available tools
-   c. Read the structured `tool_use` blocks Claude returns
-   d. Execute each tool in the sandbox
-   e. Record everything to the session log
-   f. If there are more tool_use blocks, repeat from (a) feeding back `tool_result`
-   g. When Claude stops or asks for human help, emit session.status_idle
-9. SSE stream pushes each event to the client in real time
+7. Client sends POST /events with a user.message
+8. Launcher spawns the external agent in the workspace with the prompt
+9. stdout lines stream as agent.output events → pushed to SSE subscribers
+10. Agent exits → session.status_idle or session.error emitted → SSE stream closes
 ```
 
 ## Event vocabulary (session log)
@@ -76,12 +64,19 @@ The agent loop: call Claude → read structured response → execute tools → r
 Canonical event types emitted during a session:
 
 - `session.created`
-- `session.status_running`
-- `session.status_idle` — includes `stop_reason`
-- `user.message`
-- `agent.message`
-- `agent.tool_use` — includes `tool`, `input`
-- `agent.tool_result` — includes `tool`, `result`
-- `session.error`
+- `session.status_running` — emitted when the launcher starts the external agent
+- `session.status_idle` — includes `stop_reason`; emitted when agent exits cleanly
+- `user.message` — the prompt sent by the client
+- `agent.output` — one raw stdout line from the external agent process
+- `session.error` — emitted on non-zero exit, timeout, or binary not found
 
 The SSE stream is a 1:1 mirror of the session log: every event appended to the log is also pushed to any connected subscriber.
+
+## What Mad does NOT do
+
+- Mad does not parse tool calls from agent output.
+- Mad does not execute bash commands, read files, or write files on behalf of the agent.
+- Mad does not manage conversation turns or feed tool results back to the agent.
+- Mad does not know about or care about the agent's internal loop.
+
+All agent-internal behavior (tool use, file edits, bash commands, multi-turn reasoning) happens inside the external agent's own process, in the session workspace.

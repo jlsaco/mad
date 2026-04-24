@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build the first functional version of Mad: a REST API that accepts a JSON describing an agent and a set of resources, provisions a local workspace, clones the indicated GitHub repositories, and runs an autonomous Claude session against them.
+Build the infrastructure layer of Mad: a REST API that accepts a JSON describing an agent and a set of resources, provisions an isolated local workspace, clones the indicated GitHub repositories, and launches the configured external agent (Claude Code, OpenCode, etc.) with the initial prompt. Mad streams the agent's stdout output as events and reports when the agent finishes. Mad does not manage conversation loops, execute tools, or parse LLM responses.
 
 ## Functional requirements
 
@@ -20,16 +20,16 @@ After cloning, GitHub tokens MUST be removed from the git remote URL so they nev
 The `mount_path` declared in the request is mapped to a subdirectory inside the session workspace. Absolute paths outside the workspace MUST be rejected (path traversal prevention).
 
 ### FR-4 — Session messaging
-The client MUST be able to send `user.message` events to a running session via `POST /v1/sessions/{id}/events`. The first such message starts the agent loop.
+The client MUST be able to send `user.message` events to a session via `POST /v1/sessions/{id}/events`. The first such message starts the external agent with the message content as the prompt.
 
 ### FR-5 — Event streaming
 The client MUST be able to subscribe to a real-time stream of session events via `GET /v1/sessions/{id}/stream` using Server-Sent Events.
 
-### FR-6 — Agent loop
-After receiving the first `user.message`, the harness MUST run the agent loop in the background (non-blocking) until Claude finishes, asks for human help, or hits an error. Each step MUST be recorded in the session log.
+### FR-6 — External agent launch
+After receiving the first `user.message`, the system MUST launch the configured external agent in the session workspace as a background task (non-blocking). Each stdout line from the agent process MUST be recorded in the session log as an `agent.output` event. When the process exits with code 0, a `session.status_idle` event is emitted. When it exits with a non-zero code or times out, a `session.error` event is emitted.
 
-### FR-7 — Persistence and recovery
-The session log MUST be the source of truth: an append-only JSONL file per session. If the process crashes, a new harness instance MUST be able to read the log and resume from the last event.
+### FR-7 — Persistence
+The session log MUST be the source of truth: an append-only JSONL file per session. Every event is written to this file. If the process crashes mid-session, the log preserves the history up to that point.
 
 ### FR-8 — Session lifecycle endpoints
 The API MUST expose endpoints to inspect the current state of a session, list all sessions, and delete a session (freeing its temporary workspace while preserving its log as historical record).
@@ -37,21 +37,19 @@ The API MUST expose endpoints to inspect the current state of a session, list al
 ### FR-9 — Idempotent creation
 `POST /v1/sessions` MUST accept an optional `Idempotency-Key` header. Repeated requests with the same key MUST return the already-created session instead of cloning the repos a second time.
 
-### FR-10 — LLM providers
-The system MUST support two providers, selectable via `agent.provider`:
-- `claude_cli`: runs `claude --print --output-format stream-json` headless. For Pro/Max accounts.
-- `anthropic_api`: calls the Anthropic SDK directly. Requires `ANTHROPIC_API_KEY`.
+### FR-10 — Agent launchers
+The system MUST support pluggable external agent launchers, selectable via `agent.provider`:
+- `claude_cli`: launches `claude --dangerously-skip-permissions -p "{prompt}"` in the session workspace. For Claude Pro/Max accounts. See [`../claude-cli/`](../claude-cli/README.md) for the full spec.
 
-### FR-11 — Native tool use
-Tool calls MUST use Anthropic's native structured tool use (SDK `tools=[...]` with JSON schema, or `stream-json` from the CLI). The harness MUST NOT parse tool calls from free-text with regex. Any tool call emitted as free text is ignored.
+Additional launchers (OpenCode, Codex, etc.) follow the same `AgentLauncher` protocol and are added as separate specs.
 
 ## Non-functional constraints
 
-- **NFR-1 — Package layout.** Core logic lives in the `mad` package under `src/mad/`, split by concern: `mad.api` (FastAPI app + routes), `mad.core` (session log, workspace, security), `mad.agent` (harness loop + tools), `mad.providers` (`LLMProvider` implementations). No module-level mutable globals — state is held on a `SessionStore` injected via `create_app(store=...)`. The project stays `pip install -e .` compatible.
-- **NFR-2 — Token hygiene.** GitHub tokens are used to clone and then stripped from the remote. They are never persisted to the workspace.
-- **NFR-3 — Dual logging.** Every action is printed to stdout AND appended to the session log. The log is the source of truth.
-- **NFR-4 — Environment preparation is out of scope.** The operator prepares the server's Python environment manually (`python -m venv .venv && pip install -r requirements.txt`). Mad does NOT install per-session packages. Any dependency the agent needs inside the workspace must already be available on the host, or the agent installs it as part of its work.
-- **NFR-5 — Sandbox hardening is operator's responsibility.** The current implementation executes sandbox commands as subprocesses of the FastAPI process. Hardening via `bubblewrap` or similar is documented in [`../../docs/sandbox-bwrap.md`](../../docs/sandbox-bwrap.md) and left to the operator.
+- **NFR-1 — Package layout.** Core logic lives in the `mad` package under `src/mad/`, split by concern: `mad.api` (FastAPI app + routes), `mad.core` (session log, workspace, security, `SessionStore`), `mad.providers` (`AgentLauncher` implementations and `get_launcher` factory). No module-level mutable globals — state is held on a `SessionStore` injected via `create_app(store=...)`. The project stays `pip install -e .` compatible.
+- **NFR-2 — Token hygiene.** GitHub tokens are used to clone and then stripped from the remote. They are never persisted to the workspace, the session log, or stdout.
+- **NFR-3 — Dual logging.** Every event is printed to stdout AND appended to the session log. The log is the source of truth.
+- **NFR-4 — Environment preparation is out of scope.** The operator prepares the server's Python environment manually. Mad does NOT install per-session packages.
+- **NFR-5 — Sandbox hardening is operator's responsibility.** The external agent process runs as a subprocess of the FastAPI process with access to the session workspace. Hardening via `bubblewrap` or similar is documented in [`../../docs/sandbox-bwrap.md`](../../docs/sandbox-bwrap.md) and left to the operator.
 
 ## MVP acceptance criteria
 
@@ -59,9 +57,9 @@ The MVP is done when you can:
 
 1. `POST /v1/sessions` with a GitHub repo and see it cloned correctly in the workspace.
 2. `POST /v1/sessions/{id}/events` with a `user.message` describing the work to perform.
-3. `GET /v1/sessions/{id}/stream` and watch Claude explore the repo, make changes, and report the result in real time.
+3. `GET /v1/sessions/{id}/stream` and watch `agent.output` lines stream in real time, followed by `session.status_idle`.
 4. `GET /v1/sessions/{id}` and see the final state with every event recorded.
 5. `GET /v1/sessions` and see the list of past sessions.
-6. Resume a session by sending a new `user.message` to the same `session_id`.
+6. Send a new `user.message` to an idle session and see the agent launch again.
 7. `DELETE /v1/sessions/{id}` and verify the temporary workspace is cleaned up (the session log is preserved).
 8. Resend `POST /v1/sessions` with the same `Idempotency-Key` and get the existing session back instead of a new one.
