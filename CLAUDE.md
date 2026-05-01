@@ -4,22 +4,7 @@ Project conventions and hard rules for anyone (human or Claude) working in this 
 
 ## What this project is
 
-**Mad** (Multi Agent Develop) is a self-hosted infrastructure layer that provisions isolated workspaces, clones GitHub repositories, and launches external autonomous agents (Claude Code, OpenCode, Codex, etc.) against them. Mad streams each agent's stdout as `agent.output` events and reports when the agent finishes. Mad does NOT manage agent loops, execute tools, or parse LLM responses — external agents bring their own harnesses. Full spec in [`specs/infra/`](specs/infra/README.md).
-
-## Development workflow
-
-Mad follows **spec-first + TDD-light**. To add any new feature:
-
-```
-1. /new-spec <name>        → spec-author creates specs/<name>/
-2. Review/edit the spec manually
-3. /implement specs/<name> → test-author writes failing tests
-                           → implementer writes code until green
-                           → spec-reviewer closes with a report
-4. Commit + push           → GitHub Actions runs pytest
-```
-
-The 4 subagents live in `.claude/agents/`. The 3 slash commands live in `.claude/commands/`.
+**Mad** (Multi Agent Develop) is a self-hosted infrastructure layer that provisions isolated workspaces, clones GitHub repositories, and launches external autonomous agents (Claude Code, OpenCode, Codex, etc.) against them. Mad streams each agent's stdout as `agent.output` events and reports when the agent finishes. Mad does NOT manage agent loops, execute tools, or parse LLM responses — external agents bring their own harnesses.
 
 ## Hard rules — never break these
 
@@ -47,10 +32,10 @@ Claude commits automatically whenever a version is "apparently stable". This is 
 
 A state is **apparently stable** when:
 - `pytest -q` exits 0 (all tests green).
-- `spec-reviewer` reports no ❌ on FR coverage, no hard-rule violations, and no critical risks.
+- No hard-rule violations in the current diff.
 
 When both hold, commit right away:
-- Use Conventional Commits: `feat(<spec>): ...`, `fix(<spec>): ...`, `chore: ...`, `docs: ...`.
+- Use Conventional Commits: `feat(<area>): ...`, `fix(<area>): ...`, `chore: ...`, `docs: ...`.
 - Stage only the files touched in the current loop. Never `git add -A` or `git add .` — protects against accidentally committing secrets or junk.
 - Always add the trailer `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
 - Never push. Pushing is always the user's explicit call.
@@ -74,7 +59,6 @@ The `mad` console script (`mad serve`) is also available once the package is ins
 
 ## Key files
 
-- `specs/infra/` — spec-driven package for the current milestone.
 - `docs/backlog.md` — improvements deferred past v0.1.
 - `docs/sandbox-bwrap.md` — operator's guide for hardening the sandbox with bubblewrap.
 - `pyproject.toml` — package metadata, dependencies, build backend, and the `mad` console script. Single source of truth for `pip install -e .`.
