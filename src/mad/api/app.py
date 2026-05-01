@@ -7,17 +7,35 @@ from starlette.requests import Request
 from mad.api.routes.sessions import router as sessions_router
 from mad.core import log
 from mad.core.exceptions import PathTraversalError
+from mad.core.log import JsonlSessionRepository
+from mad.core.ports.outbound.session_repository import SessionRepository
+from mad.core.ports.outbound.workspace_provisioner import WorkspaceProvisioner
+from mad.core.resources import LocalWorkspaceProvisioner
 from mad.core.sessions import SessionStore
 
 
-def create_app(store: SessionStore | None = None) -> FastAPI:
-    """Build a FastAPI app with an injected SessionStore.
+def create_app(
+    store: SessionStore | None = None,
+    session_repo: SessionRepository | None = None,
+    workspace_provisioner: WorkspaceProvisioner | None = None,
+) -> FastAPI:
+    """Build a FastAPI app with injected dependencies.
 
-    Every call creates an isolated instance — tests get a fresh store
-    so state never leaks across cases.
+    Every call creates an isolated instance — tests get a fresh store so state
+    never leaks across cases.
+
+    ``session_repo`` and ``workspace_provisioner`` are the outbound ports
+    introduced in Phase 3. If not supplied, sensible defaults are used:
+    - ``JsonlSessionRepository`` — JSONL file-backed session log.
+    - ``LocalWorkspaceProvisioner`` — local temp-dir workspace management.
+
+    Routes still call the free functions directly in this phase; the ports are
+    wired into ``app.state`` so Phase 4 can migrate callers incrementally.
     """
     app = FastAPI(title="Mad", version="0.1.0")
     app.state.store = store or SessionStore()
+    app.state.session_repo = session_repo or JsonlSessionRepository()
+    app.state.workspace_provisioner = workspace_provisioner or LocalWorkspaceProvisioner()
 
     @app.exception_handler(PathTraversalError)
     async def _path_traversal_handler(request: Request, exc: PathTraversalError) -> JSONResponse:

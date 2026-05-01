@@ -7,6 +7,10 @@ from typing import Any
 
 SESSIONS_DIR = Path("sessions")
 
+# ---------------------------------------------------------------------------
+# JsonlSessionRepository — concrete adapter implementing SessionRepository port
+# ---------------------------------------------------------------------------
+
 
 def ensure_sessions_dir() -> None:
     SESSIONS_DIR.mkdir(exist_ok=True)
@@ -42,3 +46,28 @@ def get_events(session_id: str) -> list[dict]:
         if ln:
             events.append(json.loads(ln))
     return events
+
+
+class JsonlSessionRepository:
+    """Concrete implementation of ``SessionRepository`` backed by JSONL files.
+
+    Delegates to the free functions above so callers that still use the
+    module-level API continue to work unchanged.
+    """
+
+    def append_event(
+        self,
+        session_id: str,
+        event_type: str,
+        data: dict[str, Any] | None = None,
+    ) -> dict:
+        """Append an event and return the serialised event dict."""
+        return emit(session_id, event_type, data)
+
+    def read_events(self, session_id: str) -> list[dict]:
+        """Return all events recorded for the session."""
+        return get_events(session_id)
+
+    def exists(self, session_id: str) -> bool:
+        """Return True if any events have been persisted for the session."""
+        return log_path(session_id).exists()

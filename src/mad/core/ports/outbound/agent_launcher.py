@@ -1,0 +1,27 @@
+"""Outbound port: AgentLauncher.
+
+Authoritative definition of the interface for launching external agents.
+mad.providers.base re-exports this for backwards compatibility (deprecated alias).
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Callable, Coroutine, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class AgentLauncher(Protocol):
+    """Contract that all agent launcher adapters must satisfy.
+
+    The launcher receives a prompt, a workspace path, and an async emit
+    callback. It spawns the external agent, streams stdout line-by-line as
+    ``agent.output`` events, and emits ``session.status_idle`` (exit 0) or
+    ``session.error`` (non-zero / timeout) on completion.
+    """
+
+    async def run(
+        self,
+        prompt: str,
+        workspace: Path,
+        emit: Callable[[str, dict | None], Coroutine[Any, Any, None]],
+    ) -> None: ...

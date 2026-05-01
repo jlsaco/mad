@@ -1,6 +1,11 @@
-"""Purity test: src/mad/core/ must not import FastAPI.
+"""Purity tests: src/mad/core/ must not import FastAPI or adapter internals.
 
 Enforces CLAUDE.md hard rule 4 (package layout) dynamically.
+Two tests:
+1. ``test_core_has_no_fastapi_imports`` — applies to all of mad.core (existing).
+2. ``test_ports_have_no_forbidden_imports`` — stricter check on mad.core.ports:
+   must not import fastapi, mad.api, mad.providers.claude_cli, subprocess,
+   boto3, or httpx.
 """
 from __future__ import annotations
 
@@ -11,10 +16,21 @@ from pathlib import Path
 # tests/unit/core/test_no_framework_imports.py -> tests/unit/core -> tests/unit -> tests -> repo root
 REPO_ROOT = Path(__file__).parents[3]
 CORE_DIR = REPO_ROOT / "src" / "mad" / "core"
+PORTS_DIR = CORE_DIR / "ports"
+
+# Forbidden module prefixes for the core.ports purity check.
+_PORTS_FORBIDDEN_PREFIXES = (
+    "fastapi",
+    "mad.api",
+    "mad.providers.claude_cli",
+    "subprocess",
+    "boto3",
+    "httpx",
+)
 
 
-def _collect_fastapi_imports(py_file: Path) -> list[str]:
-    """Return list of lines in py_file that import fastapi."""
+def _collect_forbidden_imports(py_file: Path, forbidden_prefixes: tuple[str, ...]) -> list[str]:
+    """Return lines in py_file that import any of the forbidden module prefixes."""
     source = py_file.read_text(encoding="utf-8")
     try:
         tree = ast.parse(source, filename=str(py_file))
@@ -24,12 +40,20 @@ def _collect_fastapi_imports(py_file: Path) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == "fastapi" or alias.name.startswith("fastapi."):
-                    violations.append(f"{py_file}:{node.lineno}: import {alias.name}")
+                for prefix in forbidden_prefixes:
+                    if alias.name == prefix or alias.name.startswith(prefix + "."):
+                        violations.append(f"{py_file}:{node.lineno}: import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
-            if node.module and (node.module == "fastapi" or node.module.startswith("fastapi.")):
-                violations.append(f"{py_file}:{node.lineno}: from {node.module} import ...")
+            module = node.module or ""
+            for prefix in forbidden_prefixes:
+                if module == prefix or module.startswith(prefix + "."):
+                    violations.append(f"{py_file}:{node.lineno}: from {module} import ...")
     return violations
+
+
+def _collect_fastapi_imports(py_file: Path) -> list[str]:
+    """Return list of lines in py_file that import fastapi."""
+    return _collect_forbidden_imports(py_file, ("fastapi",))
 
 
 def test_core_has_no_fastapi_imports():
@@ -39,5 +63,25 @@ def test_core_has_no_fastapi_imports():
         all_violations.extend(_collect_fastapi_imports(py_file))
     assert all_violations == [], (
         "Found FastAPI imports in src/mad/core/ — the domain must remain framework-agnostic:\n"
+        + "\n".join(all_violations)
+    )
+
+
+def test_ports_have_no_forbidden_imports():
+    """All .py files under src/mad/core/ports/ must not import frameworks or adapters.
+
+    Forbidden: fastapi, mad.api, mad.providers.claude_cli, subprocess, boto3, httpx.
+    This ensures ports remain pure contracts with no infrastructure dependencies.
+    """
+    if not PORTS_DIR.exists():
+        return  # Ports package not yet created — skip gracefully.
+
+    all_violations: list[str] = []
+    for py_file in sorted(PORTS_DIR.rglob("*.py")):
+        all_violations.extend(
+            _collect_forbidden_imports(py_file, _PORTS_FORBIDDEN_PREFIXES)
+        )
+    assert all_violations == [], (
+        "Found forbidden imports in src/mad/core/ports/ — ports must be pure Protocol definitions:\n"
         + "\n".join(all_violations)
     )
