@@ -41,10 +41,14 @@ Project conventions and hard rules for anyone (human or Claude) working in this 
 
 7. **AskUserQuestion for all user input.** Claude NEVER asks questions as plain text in a response turn. Whenever Claude needs a decision, confirmation, classification, or any input from the user — issue type, plan approval, branch selection, draft review — it MUST use the `AskUserQuestion` tool. Plain text in a response is for informing only, never for soliciting decisions. This rule applies to every skill, command, and workflow in this repo without exception.
 
-## Commits
+## Commits and PRs
 
-Commits are user-driven via the `/commit` command (see `.claude/commands/commit.md`).
-Claude does NOT commit automatically — it only commits when explicitly invoked.
+| Command | Purpose |
+|---|---|
+| `/commit` | Stage and commit changes following Conventional Commits + semantic-release rules. |
+| `/pr [issue-number]` | Open a pull request for the current branch. Referenced by `/work` at the end of the execution pipeline. |
+
+Claude does NOT commit or open PRs automatically — only when explicitly invoked.
 
 ## Commands
 

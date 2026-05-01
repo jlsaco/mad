@@ -143,37 +143,6 @@ If tests fail, fix them before proceeding. Do not skip this step.
 
 ## Step 9 — Open the PR
 
-Build the PR body using this structure:
+Invoke `/pr {issue_number}` to create the pull request.
 
-```markdown
-## Summary
-<1–3 bullet points describing what changed and why>
-
-## Related issue
-Closes #{issue_number}
-
-## Type of change
-- [x] <checked type>
-
-## Test plan
-- [ ] <key scenario tested>
-- [ ] <edge case covered>
-
-🤖 Generated with [Claude Code](https://claude.ai/claude-code)
-```
-
-Create the PR:
-
-```bash
-gh pr create \
-  --base {base_branch} \
-  --title "<conventional-commit-style title matching the issue>" \
-  --body "<pr-body>"
-```
-
-Use `AskUserQuestion` to confirm before running:
-
-> "Ready to open PR: `<title>` → `{base_branch}`. Confirm?"
-> Options: Open PR / Edit title / Edit body / Cancel
-
-Report the PR URL to the user.
+The `/pr` command handles title derivation, body structure, base branch confirmation, and the `gh pr create` call. Pass `{issue_number}` as the argument so it pre-fills `Closes #{issue_number}` without asking.
