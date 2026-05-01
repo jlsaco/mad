@@ -205,7 +205,6 @@ def test_token_not_in_session_response(
     )
 
 
-@pytest.mark.xfail(reason="token redaction in arbitrary agent.output events not yet implemented, see Fase 4")
 def test_token_not_in_stderr_of_launcher(
     client: TestClient, fake_launcher, bare_repo: Path
 ) -> None:

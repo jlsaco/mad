@@ -1,19 +1,34 @@
+"""Session endpoints — thin HTTP layer.
+
+Each handler:
+  1. Parses the HTTP request (JSON + headers).
+  2. Instantiates the relevant use case with dependencies from app.state.
+  3. Calls use_case.execute(input).
+  4. Maps the result (or domain exception) to an HTTP response.
+
+Business logic lives in mad.core.use_cases.sessions.*.
+"""
 from __future__ import annotations
 
-import asyncio
 import json
-import shutil
-import uuid
-from pathlib import Path
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, Request
 from fastapi.responses import StreamingResponse
 
-from mad.core import log
-from mad.core.resources import provision_file, provision_github_repo
-from mad.core.security import validate_mount_path
 from mad.core.sessions import SessionStore
-from mad.core.workspace import workspace_path
+from mad.core.use_cases.sessions.create_session import (
+    CreateSessionInput,
+    CreateSessionUseCase,
+    ResourceSpec,
+)
+from mad.core.use_cases.sessions.delete_session import DeleteSessionUseCase
+from mad.core.use_cases.sessions.get_session import GetSessionUseCase
+from mad.core.use_cases.sessions.list_sessions import ListSessionsUseCase
+from mad.core.use_cases.sessions.send_user_message import (
+    SendUserMessageInput,
+    SendUserMessageUseCase,
+)
+from mad.core.use_cases.sessions.stream_session_events import StreamSessionEventsUseCase
 from mad.providers import factory
 
 router = APIRouter()
@@ -23,34 +38,12 @@ def _store(request: Request) -> SessionStore:
     return request.app.state.store
 
 
-async def _run_launcher(
-    store: SessionStore,
-    session_id: str,
-    session: dict,
-    prompt: str,
-) -> None:
-    store.emit_and_push(session_id, "session.status_running")
-    session["status"] = "running"
-    launcher = factory.get_launcher(session["agent"]["provider"])
-    workspace = Path(session["workspace"])
+def _repo(request: Request):
+    return request.app.state.session_repo
 
-    async def emit(event_type: str, data: dict | None = None) -> None:
-        store.emit_and_push(session_id, event_type, data)
-        if event_type == "session.status_idle":
-            session["status"] = "idle"
-        elif event_type == "session.error":
-            session["status"] = "error"
 
-    try:
-        await launcher.run(prompt=prompt, workspace=workspace, emit=emit)
-    except Exception as exc:
-        if session["status"] == "running":
-            store.emit_and_push(session_id, "session.error", {"error": str(exc)})
-            session["status"] = "error"
-    finally:
-        q = store.sse_queues.get(session_id)
-        if q is not None:
-            await q.put(None)
+def _provisioner(request: Request):
+    return request.app.state.workspace_provisioner
 
 
 @router.post("/v1/sessions")
@@ -58,74 +51,61 @@ async def create_session(
     request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> dict:
-    log.ensure_sessions_dir()
     store = _store(request)
-
-    if idempotency_key and idempotency_key in store.idempotency:
-        existing_id = store.idempotency[idempotency_key]
-        return store.sessions[existing_id]["response"]
-
     body = await request.json()
     agent = body["agent"]
-    resources = body.get("resources", [])
+    raw_resources = body.get("resources", [])
 
-    for res in resources:
-        validate_mount_path(res["mount_path"])
+    resource_specs = [
+        ResourceSpec(
+            type=r["type"],
+            mount_path=r["mount_path"],
+            url=r.get("url", ""),
+            authorization_token=r.get("authorization_token"),
+            checkout=r.get("checkout"),
+            content=r.get("content", ""),
+        )
+        for r in raw_resources
+    ]
 
-    session_id = "sesn_" + uuid.uuid4().hex[:12]
-    workspace = workspace_path(session_id)
-    workspace.mkdir(parents=True, exist_ok=True)
+    use_case = CreateSessionUseCase(
+        repo=_repo(request),
+        provisioner=_provisioner(request),
+        sessions_index=store.sessions,
+        idempotency_index=store.idempotency,
+    )
 
-    log.emit(session_id, "session.created", {"agent": agent["name"]})
+    output = use_case.execute(
+        CreateSessionInput(
+            agent=agent,
+            resources=resource_specs,
+            idempotency_key=idempotency_key,
+        )
+    )
 
-    resources_mounted = []
-    for res in resources:
-        if res["type"] == "github_repository":
-            mounted = provision_github_repo(session_id, res)
-        elif res["type"] == "file":
-            mounted = provision_file(session_id, res)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown resource type: {res['type']!r}")
-        resources_mounted.append(mounted)
+    # Ensure SSE queue exists for the session
+    store.get_or_create_queue(output.session.session_id)
 
-    response = {
-        "session_id": session_id,
-        "status": "created",
-        "workspace": str(workspace),
-        "resources_mounted": resources_mounted,
-    }
-
-    store.sessions[session_id] = {
-        "session_id": session_id,
-        "agent": agent,
-        "workspace": str(workspace),
-        "status": "created",
-        "response": response,
-    }
-    store.get_or_create_queue(session_id)
-
-    if idempotency_key:
-        store.idempotency[idempotency_key] = session_id
-
-    return response
+    return output.session.response
 
 
 @router.post("/v1/sessions/{session_id}/events")
 async def send_events(session_id: str, request: Request) -> dict:
     store = _store(request)
-    if session_id not in store.sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-
     body = await request.json()
     events = body.get("events", [])
-    session = store.sessions[session_id]
+
+    use_case = SendUserMessageUseCase(
+        repo=_repo(request),
+        sessions_index=store.sessions,
+        sse_queues=store.sse_queues,
+        get_launcher=factory.get_launcher,
+    )
 
     for event in events:
-        event_type = event.get("type")
-        if event_type == "user.message":
+        if event.get("type") == "user.message":
             content = event.get("content", "")
-            log.emit(session_id, "user.message", {"content": content})
-            asyncio.create_task(_run_launcher(store, session_id, session, content))
+            use_case.execute(SendUserMessageInput(session_id=session_id, content=content))
 
     return {"status": "accepted"}
 
@@ -133,10 +113,12 @@ async def send_events(session_id: str, request: Request) -> dict:
 @router.get("/v1/sessions/{session_id}/stream")
 async def stream_session(session_id: str, request: Request) -> StreamingResponse:
     store = _store(request)
-    if session_id not in store.sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
 
-    queue = store.get_or_create_queue(session_id)
+    use_case = StreamSessionEventsUseCase(
+        sessions_index=store.sessions,
+        sse_queues=store.sse_queues,
+    )
+    queue = use_case.execute(session_id)
 
     async def event_generator():
         while True:
@@ -151,40 +133,38 @@ async def stream_session(session_id: str, request: Request) -> StreamingResponse
 @router.get("/v1/sessions/{session_id}")
 async def get_session(session_id: str, request: Request) -> dict:
     store = _store(request)
-    if session_id not in store.sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    session = store.sessions[session_id]
-    events = log.get_events(session_id)
+
+    use_case = GetSessionUseCase(
+        repo=_repo(request),
+        sessions_index=store.sessions,
+    )
+    output = use_case.execute(session_id)
+
     return {
-        "session_id": session_id,
-        "status": session["status"],
-        "workspace": session["workspace"],
-        "events": events,
+        "session_id": output.session_id,
+        "status": output.status,
+        "workspace": output.workspace,
+        "events": output.events,
     }
 
 
 @router.get("/v1/sessions")
 async def list_sessions(request: Request) -> list:
     store = _store(request)
-    return [
-        {"session_id": sid, "status": s["status"]}
-        for sid, s in store.sessions.items()
-    ]
+
+    use_case = ListSessionsUseCase(sessions_index=store.sessions)
+    summaries = use_case.execute()
+    return [{"session_id": s.session_id, "status": s.status} for s in summaries]
 
 
 @router.delete("/v1/sessions/{session_id}")
 async def delete_session(session_id: str, request: Request) -> dict:
     store = _store(request)
-    if session_id not in store.sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
 
-    session = store.sessions[session_id]
-    workspace = Path(session["workspace"])
-
-    if workspace.exists():
-        shutil.rmtree(workspace)
-
-    session["status"] = "deleted"
-    store.sse_queues.pop(session_id, None)
-
-    return {"status": "deleted", "session_id": session_id}
+    use_case = DeleteSessionUseCase(
+        provisioner=_provisioner(request),
+        sessions_index=store.sessions,
+        sse_queues=store.sse_queues,
+    )
+    output = use_case.execute(session_id)
+    return {"status": output.status, "session_id": output.session_id}

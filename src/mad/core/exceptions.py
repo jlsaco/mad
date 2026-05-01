@@ -1,12 +1,10 @@
+"""DEPRECATED shim — will be removed in Phase 6.
+
+Re-exports DomainError and PathTraversalError from the canonical location
+in mad.core.domain.exceptions so existing imports continue to work.
+"""
 from __future__ import annotations
 
+from mad.core.domain.exceptions.base import DomainError, PathTraversalError, SessionNotFound
 
-class DomainError(Exception):
-    """Base para excepciones del dominio."""
-
-
-class PathTraversalError(DomainError):
-    def __init__(self, mount_path: str, reason: str) -> None:
-        super().__init__(f"invalid mount_path '{mount_path}': {reason}")
-        self.mount_path = mount_path
-        self.reason = reason
+__all__ = ["DomainError", "PathTraversalError", "SessionNotFound"]

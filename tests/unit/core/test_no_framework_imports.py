@@ -1,11 +1,13 @@
 """Purity tests: src/mad/core/ must not import FastAPI or adapter internals.
 
 Enforces CLAUDE.md hard rule 4 (package layout) dynamically.
-Two tests:
+Three tests:
 1. ``test_core_has_no_fastapi_imports`` — applies to all of mad.core (existing).
 2. ``test_ports_have_no_forbidden_imports`` — stricter check on mad.core.ports:
    must not import fastapi, mad.api, mad.providers.claude_cli, subprocess,
    boto3, or httpx.
+3. ``test_domain_and_use_cases_have_no_forbidden_imports`` — Phase 4: same strict
+   check for mad.core.domain and mad.core.use_cases.
 """
 from __future__ import annotations
 
@@ -17,6 +19,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parents[3]
 CORE_DIR = REPO_ROOT / "src" / "mad" / "core"
 PORTS_DIR = CORE_DIR / "ports"
+DOMAIN_DIR = CORE_DIR / "domain"
+USE_CASES_DIR = CORE_DIR / "use_cases"
 
 # Forbidden module prefixes for the core.ports purity check.
 _PORTS_FORBIDDEN_PREFIXES = (
@@ -26,6 +30,16 @@ _PORTS_FORBIDDEN_PREFIXES = (
     "subprocess",
     "boto3",
     "httpx",
+)
+
+# Phase 4: same forbidden set for domain + use_cases
+_DOMAIN_FORBIDDEN_PREFIXES = (
+    "fastapi",
+    "mad.api",
+    "mad.providers.claude_cli",
+    "subprocess",
+    "httpx",
+    "boto3",
 )
 
 
@@ -83,5 +97,25 @@ def test_ports_have_no_forbidden_imports():
         )
     assert all_violations == [], (
         "Found forbidden imports in src/mad/core/ports/ — ports must be pure Protocol definitions:\n"
+        + "\n".join(all_violations)
+    )
+
+
+def test_domain_and_use_cases_have_no_forbidden_imports():
+    """Phase 4: domain/ and use_cases/ must not import frameworks or infra adapters.
+
+    Forbidden: fastapi, mad.api, mad.providers.claude_cli, subprocess, httpx, boto3.
+    """
+    all_violations: list[str] = []
+    for directory in (DOMAIN_DIR, USE_CASES_DIR):
+        if not directory.exists():
+            continue
+        for py_file in sorted(directory.rglob("*.py")):
+            all_violations.extend(
+                _collect_forbidden_imports(py_file, _DOMAIN_FORBIDDEN_PREFIXES)
+            )
+    assert all_violations == [], (
+        "Found forbidden imports in src/mad/core/domain/ or src/mad/core/use_cases/ "
+        "— these packages must remain framework-agnostic:\n"
         + "\n".join(all_violations)
     )

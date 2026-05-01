@@ -12,7 +12,6 @@ from mad.api.app import create_app
 from mad.core.sessions import SessionStore
 
 
-@pytest.mark.xfail(reason="lazy JSONL rehydration on GET not yet implemented, see Fase 4")
 def test_get_session_reads_events_from_jsonl_after_restart(
     fake_launcher, session_payload: dict, tmp_sessions_dir
 ) -> None:
