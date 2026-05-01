@@ -39,6 +39,8 @@ Project conventions and hard rules for anyone (human or Claude) working in this 
 
 6. **Source of truth is the session log.** Every action is both printed to stdout AND appended to the session log JSONL. The log is authoritative; if the process crashes, a new harness reads the log and resumes.
 
+7. **AskUserQuestion for all user input.** Claude NEVER asks questions as plain text in a response turn. Whenever Claude needs a decision, confirmation, classification, or any input from the user — issue type, plan approval, branch selection, draft review — it MUST use the `AskUserQuestion` tool. Plain text in a response is for informing only, never for soliciting decisions. This rule applies to every skill, command, and workflow in this repo without exception.
+
 ## Commits
 
 Commits are user-driven via the `/commit` command (see `.claude/commands/commit.md`).
@@ -56,6 +58,23 @@ make clean     # drop caches, build artifacts, sessions/
 ```
 
 The `mad` console script (`mad serve`) is also available once the package is installed.
+
+## Skills
+
+Project-level skills live in `.claude/skills/`. Invoke with `/skill-name` or via the `Skill` tool.
+
+| Skill | Path | Purpose |
+|---|---|---|
+| `intake` | `.claude/skills/intake/SKILL.md` | Full issue intake pipeline: classify → search → refine → create. Embeds issue templates in `resources/templates/`. |
+| `work` | `.claude/skills/work/SKILL.md` | Full issue execution pipeline: read → branch → work → commit → PR. |
+
+Agents (spawned as subagents by the skills above):
+
+| Agent | Path | Purpose |
+|---|---|---|
+| `search-issues` | `.claude/agents/search-issues.md` | Read-only GitHub issue search: duplicates, related, blockers. Spawned by `/intake`. |
+
+**Template sync rule.** `.claude/skills/intake/resources/templates/<type>.md` and `.github/ISSUE_TEMPLATE/<type>.yml` are mirrors. Changing one requires updating the other. The `resources/templates/` files are the canonical source; `.github/ISSUE_TEMPLATE/` files expose them in the GitHub web UI.
 
 ## Key files
 
