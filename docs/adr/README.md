@@ -38,3 +38,4 @@ What else was on the table, and why did we reject it?
 |---|---|---|
 | [ADR-0001](0001-testing-strategy.md) | Testing strategy and coverage thresholds | Accepted |
 | [ADR-0002](0002-quality-tooling-bundle.md) | Quality tooling bundle (ruff, mypy, import-linter, pre-commit, gitleaks, pip-audit) | Accepted |
+| [ADR-0003](0003-package-layout.md) | Package layout (hexagonal, ports-and-adapters) | Accepted |
