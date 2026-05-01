@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from mad.core.ports.outbound.agent_launcher import AgentLauncher
-from mad.providers.claude_cli import ClaudeCLIProvider
+from mad.adapters.outbound.agents.claude_cli import ClaudeCLIProvider
 
 
 def get_launcher(name: str) -> AgentLauncher:

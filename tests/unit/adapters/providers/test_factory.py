@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mad.providers.factory import get_launcher
+from mad.adapters.outbound.agents.factory import get_launcher
 
 
 def test_get_launcher_unknown_name_raises():

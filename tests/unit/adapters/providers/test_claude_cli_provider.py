@@ -20,7 +20,7 @@ from typing import Callable, Awaitable
 
 import pytest
 
-from mad.providers.claude_cli import ClaudeCLIProvider
+from mad.adapters.outbound.agents.claude_cli import ClaudeCLIProvider
 
 
 # ---------------------------------------------------------------------------

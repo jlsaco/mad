@@ -19,7 +19,7 @@ def main() -> None:
                 host = next(it)
             elif token == "--port":
                 port = int(next(it))
-        uvicorn.run("mad.api.app:create_app", host=host, port=port, factory=True)
+        uvicorn.run("mad.adapters.inbound.http.app:create_app", host=host, port=port, factory=True)
         return
     print(f"unknown command: {argv[0]!r}", file=sys.stderr)
     sys.exit(2)

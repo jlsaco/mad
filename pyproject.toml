@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-mad = "mad.cli:main"
+mad = "mad.entry_points.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jlsaco/mad"

@@ -9,8 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import mad.core.log as _core_log
-from mad.api.app import create_app
-from mad.providers import factory
+import mad.adapters.outbound.persistence.jsonl_session_repository as _adapter_log
+from mad.adapters.inbound.http import create_app
+from mad.adapters.outbound.agents import factory
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +126,16 @@ def session_payload(bare_repo: Path) -> dict:
 
 @pytest.fixture
 def tmp_sessions_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Monkeypatch mad.core.log.SESSIONS_DIR to a tmp_path subdirectory.
+    """Monkeypatch SESSIONS_DIR to a tmp_path subdirectory.
+
+    Patches both the adapter module (canonical location) and the legacy
+    mad.core.log shim so that all code paths write to the same tmp directory.
 
     Tests that check JSONL persistence should use this fixture so they don't
     depend on (or pollute) the CWD-relative 'sessions/' directory.
     """
     sessions = tmp_path / "sessions"
     sessions.mkdir()
+    monkeypatch.setattr(_adapter_log, "SESSIONS_DIR", sessions)
     monkeypatch.setattr(_core_log, "SESSIONS_DIR", sessions)
     return sessions

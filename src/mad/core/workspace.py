@@ -1,20 +1,13 @@
+"""DEPRECATED shim — implementation moved to mad.adapters.outbound.persistence.local_workspace_provisioner.
+
+This module re-exports everything for backwards compatibility until Phase 6.
+Do not import this module in new code.
+"""
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from mad.adapters.outbound.persistence.local_workspace_provisioner import (
+    local_path_for_mount,
+    workspace_path,
+)
 
-
-def workspace_path(session_id: str) -> Path:
-    return Path(tempfile.gettempdir()) / f"mad_{session_id}"
-
-
-def local_path_for_mount(session_id: str, mount_path: str) -> Path:
-    """Map a /workspace/... mount_path into the real temp workspace directory."""
-    relative = mount_path.lstrip("/")
-    if relative.startswith("workspace/") or relative == "workspace":
-        relative = relative[len("workspace"):]
-    relative = relative.lstrip("/")
-    base = workspace_path(session_id)
-    if relative:
-        return base / relative
-    return base
+__all__ = ["local_path_for_mount", "workspace_path"]

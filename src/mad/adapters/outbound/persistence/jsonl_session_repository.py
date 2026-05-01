@@ -8,7 +8,7 @@ from typing import Any
 SESSIONS_DIR = Path("sessions")
 
 # ---------------------------------------------------------------------------
-# JsonlSessionRepository — concrete adapter implementing SessionRepository port
+# Free functions (module-level API)
 # ---------------------------------------------------------------------------
 
 
@@ -53,9 +53,6 @@ class JsonlSessionRepository:
 
     Delegates to the free functions above so callers that still use the
     module-level API continue to work unchanged.
-
-    DEPRECATED: use mad.adapters.outbound.persistence.jsonl_session_repository.JsonlSessionRepository
-    This shim will be removed in Phase 6.
     """
 
     def append_event(

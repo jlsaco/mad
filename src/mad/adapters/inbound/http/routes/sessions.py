@@ -29,7 +29,7 @@ from mad.core.use_cases.sessions.send_user_message import (
     SendUserMessageUseCase,
 )
 from mad.core.use_cases.sessions.stream_session_events import StreamSessionEventsUseCase
-from mad.providers import factory
+from mad.adapters.outbound.agents import factory
 
 router = APIRouter()
 

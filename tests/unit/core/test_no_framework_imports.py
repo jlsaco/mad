@@ -1,12 +1,16 @@
 """Purity tests: src/mad/core/ must not import FastAPI or adapter internals.
 
 Enforces CLAUDE.md hard rule 4 (package layout) dynamically.
-Three tests:
-1. ``test_core_has_no_fastapi_imports`` — applies to all of mad.core (existing).
+
+Tests:
+1. ``test_core_has_no_fastapi_imports`` — all of mad.core must not import fastapi,
+   mad.api, mad.providers, subprocess, or shutil.
+   Note: legacy shim files (core/resources.py, core/workspace.py) may import
+   from mad.adapters while they are being deprecated (scheduled removal in Phase 6).
 2. ``test_ports_have_no_forbidden_imports`` — stricter check on mad.core.ports:
-   must not import fastapi, mad.api, mad.providers.claude_cli, subprocess,
-   boto3, or httpx.
-3. ``test_domain_and_use_cases_have_no_forbidden_imports`` — Phase 4: same strict
+   must not import fastapi, mad.api, mad.providers.claude_cli, mad.adapters,
+   subprocess, boto3, or httpx.
+3. ``test_domain_and_use_cases_have_no_forbidden_imports`` — Phase 4/5: same strict
    check for mad.core.domain and mad.core.use_cases.
 """
 from __future__ import annotations
@@ -22,21 +26,36 @@ PORTS_DIR = CORE_DIR / "ports"
 DOMAIN_DIR = CORE_DIR / "domain"
 USE_CASES_DIR = CORE_DIR / "use_cases"
 
+# Forbidden module prefixes for the broad core check.
+# mad.adapters is excluded here because deprecated shims at core root level
+# (core/resources.py, core/workspace.py) still re-export from adapters until Phase 6.
+_CORE_FORBIDDEN_PREFIXES = (
+    "fastapi",
+    "mad.api",
+    "mad.providers",
+    "subprocess",
+    "shutil",
+    "httpx",
+    "boto3",
+)
+
 # Forbidden module prefixes for the core.ports purity check.
 _PORTS_FORBIDDEN_PREFIXES = (
     "fastapi",
     "mad.api",
-    "mad.providers.claude_cli",
+    "mad.providers",
+    "mad.adapters",
     "subprocess",
     "boto3",
     "httpx",
 )
 
-# Phase 4: same forbidden set for domain + use_cases
+# Phase 4/5: same forbidden set for domain + use_cases
 _DOMAIN_FORBIDDEN_PREFIXES = (
     "fastapi",
     "mad.api",
-    "mad.providers.claude_cli",
+    "mad.providers",
+    "mad.adapters",
     "subprocess",
     "httpx",
     "boto3",
@@ -81,10 +100,28 @@ def test_core_has_no_fastapi_imports():
     )
 
 
+def test_core_has_no_infra_imports():
+    """All .py files under src/mad/core/ must not import infrastructure concerns.
+
+    Forbidden: fastapi, mad.api, mad.providers, subprocess, shutil, httpx, boto3.
+    Note: mad.adapters imports are allowed in deprecated shims at the core root level
+    (core/resources.py, core/workspace.py) until Phase 6 removes them.
+    """
+    all_violations: list[str] = []
+    for py_file in sorted(CORE_DIR.rglob("*.py")):
+        all_violations.extend(
+            _collect_forbidden_imports(py_file, _CORE_FORBIDDEN_PREFIXES)
+        )
+    assert all_violations == [], (
+        "Found infrastructure imports in src/mad/core/ — the domain must remain clean:\n"
+        + "\n".join(all_violations)
+    )
+
+
 def test_ports_have_no_forbidden_imports():
     """All .py files under src/mad/core/ports/ must not import frameworks or adapters.
 
-    Forbidden: fastapi, mad.api, mad.providers.claude_cli, subprocess, boto3, httpx.
+    Forbidden: fastapi, mad.api, mad.providers, mad.adapters, subprocess, boto3, httpx.
     This ensures ports remain pure contracts with no infrastructure dependencies.
     """
     if not PORTS_DIR.exists():
@@ -102,9 +139,9 @@ def test_ports_have_no_forbidden_imports():
 
 
 def test_domain_and_use_cases_have_no_forbidden_imports():
-    """Phase 4: domain/ and use_cases/ must not import frameworks or infra adapters.
+    """Phase 4/5: domain/ and use_cases/ must not import frameworks or infra adapters.
 
-    Forbidden: fastapi, mad.api, mad.providers.claude_cli, subprocess, httpx, boto3.
+    Forbidden: fastapi, mad.api, mad.providers, mad.adapters, subprocess, httpx, boto3.
     """
     all_violations: list[str] = []
     for directory in (DOMAIN_DIR, USE_CASES_DIR):

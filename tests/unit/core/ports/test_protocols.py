@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from mad.core.log import JsonlSessionRepository
+from mad.adapters.outbound.persistence.jsonl_session_repository import JsonlSessionRepository
+from mad.adapters.outbound.persistence.local_workspace_provisioner import LocalWorkspaceProvisioner
+from mad.adapters.outbound.agents.fake import FakeLauncher
 from mad.core.ports import AgentLauncher, SessionRepository, WorkspaceProvisioner
-from mad.core.resources import LocalWorkspaceProvisioner
-from mad.providers.fake import FakeLauncher
 
 
 # ---------------------------------------------------------------------------
@@ -76,20 +76,20 @@ class TestSessionRepositoryPort:
         assert repo is not None
 
     def test_read_events_returns_list_for_unknown_session(self, tmp_path, monkeypatch):
-        import mad.core.log as _log
+        import mad.adapters.outbound.persistence.jsonl_session_repository as _log
         monkeypatch.setattr(_log, "SESSIONS_DIR", tmp_path / "sessions")
         repo = JsonlSessionRepository()
         events = repo.read_events("nonexistent_session")
         assert events == []
 
     def test_exists_returns_false_for_unknown_session(self, tmp_path, monkeypatch):
-        import mad.core.log as _log
+        import mad.adapters.outbound.persistence.jsonl_session_repository as _log
         monkeypatch.setattr(_log, "SESSIONS_DIR", tmp_path / "sessions")
         repo = JsonlSessionRepository()
         assert repo.exists("nonexistent_session") is False
 
     def test_append_and_read_roundtrip(self, tmp_path, monkeypatch):
-        import mad.core.log as _log
+        import mad.adapters.outbound.persistence.jsonl_session_repository as _log
         sessions = tmp_path / "sessions"
         sessions.mkdir()
         monkeypatch.setattr(_log, "SESSIONS_DIR", sessions)
@@ -123,8 +123,7 @@ class TestWorkspaceProvisionerPort:
         assert provisioner is not None
 
     def test_create_returns_path(self, tmp_path, monkeypatch):
-        # Patch the imported name in resources, not in workspace module
-        import mad.core.resources as _res
+        import mad.adapters.outbound.persistence.local_workspace_provisioner as _res
         monkeypatch.setattr(_res, "workspace_path", lambda sid: tmp_path / f"mad_{sid}")
         provisioner = LocalWorkspaceProvisioner()
         path = provisioner.create("sid_test")
@@ -132,7 +131,7 @@ class TestWorkspaceProvisionerPort:
         assert path.is_dir()
 
     def test_destroy_removes_workspace(self, tmp_path, monkeypatch):
-        import mad.core.resources as _res
+        import mad.adapters.outbound.persistence.local_workspace_provisioner as _res
         ws = tmp_path / "mad_sid_del"
         ws.mkdir()
         monkeypatch.setattr(_res, "workspace_path", lambda sid: tmp_path / f"mad_{sid}")
@@ -141,7 +140,7 @@ class TestWorkspaceProvisionerPort:
         assert not ws.exists()
 
     def test_destroy_noop_if_missing(self, tmp_path, monkeypatch):
-        import mad.core.resources as _res
+        import mad.adapters.outbound.persistence.local_workspace_provisioner as _res
         monkeypatch.setattr(_res, "workspace_path", lambda sid: tmp_path / f"mad_{sid}")
         provisioner = LocalWorkspaceProvisioner()
         # Should not raise even if workspace doesn't exist
