@@ -25,23 +25,10 @@ Project conventions and hard rules for anyone (human or Claude) working in this 
 
 6. **Source of truth is the session log.** Every action is both printed to stdout AND appended to the session log JSONL. The log is authoritative; if the process crashes, a new harness reads the log and resumes.
 
-## Commit policy
+## Commits
 
-Claude commits automatically whenever a version is "apparently stable". This is a standing instruction — no per-commit approval needed.
-
-A state is **apparently stable** when:
-- `pytest -q` exits 0 (all tests green).
-- No hard-rule violations in the current diff.
-
-When both hold, commit right away:
-- Use Conventional Commits: `feat(<area>): ...`, `fix(<area>): ...`, `chore: ...`, `docs: ...`.
-- Stage only the files touched in the current loop. Never `git add -A` or `git add .` — protects against accidentally committing secrets or junk.
-- Always add the trailer `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
-- Never push. Pushing is always the user's explicit call.
-- Never amend. If a commit is wrong, create a follow-up commit.
-- Never use `--no-verify`.
-
-If the state is NOT stable, do not commit. Report what blocks stability and leave the working tree as-is.
+Commits are user-driven via the `/commit` command (see `.claude/commands/commit.md`).
+Claude does NOT commit automatically — it only commits when explicitly invoked.
 
 ## Commands
 
