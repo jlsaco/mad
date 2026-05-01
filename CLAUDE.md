@@ -80,8 +80,16 @@ Agents (spawned as subagents by the skills above):
 
 **Template sync rule.** `.claude/skills/intake/resources/templates/<type>.md` and `.github/ISSUE_TEMPLATE/<type>.yml` are mirrors. Changing one requires updating the other. The `resources/templates/` files are the canonical source; `.github/ISSUE_TEMPLATE/` files expose them in the GitHub web UI.
 
+## Architecture decisions
+
+Load-bearing decisions are recorded as ADRs in `docs/adr/` — see `docs/adr/README.md` for the index. Read these before making structural changes; if you disagree with one, supersede it with a new ADR rather than diverging silently. Currently:
+
+- [ADR-0001](docs/adr/0001-testing-strategy.md) — testing heuristic and coverage thresholds.
+- [ADR-0002](docs/adr/0002-quality-tooling-bundle.md) — ruff, mypy, import-linter, pre-commit, gitleaks, pip-audit, CI layout.
+
 ## Key files
 
+- `docs/adr/` — Architecture Decision Records; the *why* behind structural choices.
 - `docs/backlog.md` — improvements deferred past v0.1.
 - `docs/sandbox-bwrap.md` — operator's guide for hardening the sandbox with bubblewrap.
 - `pyproject.toml` — package metadata, dependencies, build backend, and the `mad` console script. Single source of truth for `pip install -e .`.
