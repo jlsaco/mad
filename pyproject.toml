@@ -75,9 +75,16 @@ exclude = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra"
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 markers = [
   "smoke: hard-rule invariants that must stay green across migration phases",
+]
+# Treat DeprecationWarnings from our own code as errors so deprecations are
+# fixed instead of accumulating; tolerate third-party deprecations until we
+# choose to upgrade.
+filterwarnings = [
+  "error::DeprecationWarning:mad.*",
+  "ignore::DeprecationWarning",
 ]
 
 # Coverage policy — see .claude/memories/testing-heuristic.md

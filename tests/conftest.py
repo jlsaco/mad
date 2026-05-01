@@ -8,8 +8,7 @@ from fastapi.testclient import TestClient
 
 import mad.adapters.outbound.persistence.jsonl_session_repository as _adapter_log
 from mad.adapters.inbound.http import create_app
-from mad.adapters.outbound.agents import factory
-from mad.adapters.outbound.agents.fake import FakeLauncher
+from support.launchers import ScriptedLauncher
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -17,23 +16,14 @@ from mad.adapters.outbound.agents.fake import FakeLauncher
 
 
 @pytest.fixture
-def fake_launcher(monkeypatch: pytest.MonkeyPatch) -> FakeLauncher:
-    """Return a FakeLauncher and monkeypatch get_launcher to return it."""
-    launcher = FakeLauncher()
-    monkeypatch.setattr(factory, "get_launcher", lambda name: launcher)
-    return launcher
-
-
-# Keep fake_provider as an alias so any remaining references don't break
-# immediately — but new tests MUST use fake_launcher.
-@pytest.fixture
-def fake_provider(fake_launcher: FakeLauncher) -> FakeLauncher:
-    return fake_launcher
+def fake_launcher() -> ScriptedLauncher:
+    """Return a ScriptedLauncher; injected into create_app via launcher_factory."""
+    return ScriptedLauncher()
 
 
 @pytest.fixture
-def client(fake_launcher: FakeLauncher) -> TestClient:
-    return TestClient(create_app())
+def client(fake_launcher: ScriptedLauncher) -> TestClient:
+    return TestClient(create_app(launcher_factory=lambda name: fake_launcher))
 
 
 @pytest.fixture

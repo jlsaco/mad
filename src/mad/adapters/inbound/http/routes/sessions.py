@@ -16,7 +16,6 @@ import json
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import StreamingResponse
 
-from mad.adapters.outbound.agents import factory
 from mad.core.sessions import SessionStore
 from mad.core.use_cases.sessions.create_session import (
     CreateSessionInput,
@@ -100,7 +99,7 @@ async def send_events(session_id: str, request: Request) -> dict:
         repo=_repo(request),
         sessions_index=store.sessions,
         sse_queues=store.sse_queues,
-        get_launcher=factory.get_launcher,
+        get_launcher=request.app.state.launcher_factory,
     )
 
     for event in events:
