@@ -3,10 +3,12 @@
 Authoritative definition of the interface for launching external agents.
 Implementations live in mad.adapters.outbound.agents.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -23,5 +25,5 @@ class AgentLauncher(Protocol):
         self,
         prompt: str,
         workspace: Path,
-        emit: Callable[[str, dict | None], Coroutine[Any, Any, None]],
+        emit: Callable[[str, dict[str, Any] | None], Coroutine[Any, Any, None]],
     ) -> None: ...

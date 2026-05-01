@@ -33,7 +33,7 @@ class SendUserMessageUseCase:
         self,
         repo: SessionRepository,
         sessions_index: dict[str, Session],
-        sse_queues: dict[str, asyncio.Queue],
+        sse_queues: dict[str, asyncio.Queue[Any]],
         get_launcher: Callable[[str], Any],
     ) -> None:
         self._repo = repo
@@ -64,7 +64,7 @@ async def _run_launcher(
     session: Session,
     session_id: str,
     prompt: str,
-    sse_queues: dict[str, asyncio.Queue],
+    sse_queues: dict[str, asyncio.Queue[Any]],
     get_launcher: Callable[[str], Any],
 ) -> None:
     """Internal coroutine: run the launcher and handle lifecycle events."""
@@ -77,7 +77,7 @@ async def _run_launcher(
     launcher = get_launcher(session.agent["provider"])
     workspace = Path(session.workspace)
 
-    async def emit(event_type: str, data: dict | None = None) -> None:
+    async def emit(event_type: str, data: dict[str, Any] | None = None) -> None:
         redacted_data = _redact_tokens(data, tokens_to_redact) if data and tokens_to_redact else data
         _emit_and_push(repo, session, session_id, sse_queues, event_type, redacted_data)
         if event_type == "session.status_idle":
@@ -101,10 +101,10 @@ def _emit_and_push(
     repo: SessionRepository,
     session: Session,
     session_id: str,
-    sse_queues: dict[str, asyncio.Queue],
+    sse_queues: dict[str, asyncio.Queue[Any]],
     event_type: str,
-    data: dict | None = None,
-) -> dict:
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Append event to log and push to SSE queue."""
     event = repo.append_event(session_id, event_type, data)
     q = sse_queues.get(session_id)

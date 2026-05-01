@@ -3,6 +3,7 @@
 Formal contract for persisting and reading session events.
 The source of truth is the JSONL session log (CLAUDE.md hard rule 6).
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
@@ -21,8 +22,8 @@ class SessionRepository(Protocol):
         session_id: str,
         event_type: str,
         data: dict[str, Any] | None = None,
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
 
-    def read_events(self, session_id: str) -> list[dict]: ...
+    def read_events(self, session_id: str) -> list[dict[str, Any]]: ...
 
     def exists(self, session_id: str) -> bool: ...

@@ -1,6 +1,7 @@
 """DeleteSession use case."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from mad.core.domain.entities.session import Session
@@ -21,7 +22,7 @@ class DeleteSessionUseCase:
         self,
         provisioner: WorkspaceProvisioner,
         sessions_index: dict[str, Session],
-        sse_queues: dict,
+        sse_queues: dict[str, asyncio.Queue[object]],
     ) -> None:
         self._provisioner = provisioner
         self._sessions = sessions_index
