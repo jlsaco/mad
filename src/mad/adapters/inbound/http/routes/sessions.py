@@ -138,6 +138,7 @@ async def delete_session(session_id: str, request: Request) -> dict:
     use_case = DeleteSessionUseCase(
         provisioner=_provisioner(request),
         sessions_index=store.sessions,
+        emitter=request.app.state.event_emitter,
     )
-    output = use_case.execute(session_id)
+    output = await use_case.execute(session_id)
     return {"status": output.status, "session_id": output.session_id}

@@ -6,6 +6,8 @@ import pytest
 
 from mad.core.domain.entities.session import Session
 from mad.core.domain.exceptions.base import SessionNotFound
+from mad.core.events.domain.event import event_from_persisted
+from mad.core.events.emitter import EventEmitter
 from mad.core.use_cases.sessions.delete_session import DeleteSessionUseCase
 
 
@@ -26,34 +28,74 @@ class FakeProvisioner:
         pass
 
 
-def _make_session(session_id="sesn_del"):
-    return Session(
+class FakeStore:
+    def __init__(self):
+        self.appended: list[tuple[str, str, dict | None]] = []
+
+    def append(self, session_id, type, data=None):
+        self.appended.append((session_id, type, data))
+        raw = {"event_id": None, "type": type, "timestamp": "", **(data or {})}
+        return event_from_persisted(raw, session_id)
+
+
+class FakeBus:
+    def __init__(self):
+        self.published: list = []
+
+    async def publish(self, event):
+        self.published.append(event)
+
+    def subscribe(self, event_filter):  # pragma: no cover - unused here
+        raise NotImplementedError
+
+
+def _make_session(session_id="sesn_del", status="idle"):
+    s = Session(
         session_id=session_id,
         agent={"name": "t", "provider": "fake"},
         workspace="/tmp/mad_" + session_id,
     )
+    s.status = status
+    return s
 
 
-def test_delete_session_happy_path():
-    sessions = {"sesn_del": _make_session()}
-    provisioner = FakeProvisioner()
+def _make_uc(sessions, provisioner):
+    store = FakeStore()
+    bus = FakeBus()
+    emitter = EventEmitter(store=store, bus=bus)
     uc = DeleteSessionUseCase(
         provisioner=provisioner,
         sessions_index=sessions,
+        emitter=emitter,
     )
-    out = uc.execute("sesn_del")
+    return uc, store, bus
+
+
+async def test_delete_session_happy_path():
+    sessions = {"sesn_del": _make_session(status="idle")}
+    provisioner = FakeProvisioner()
+    uc, _, _ = _make_uc(sessions, provisioner)
+    out = await uc.execute("sesn_del")
     assert out.status == "deleted"
     assert out.session_id == "sesn_del"
     assert sessions["sesn_del"].status == "deleted"
     assert "sesn_del" in provisioner.destroyed
 
 
-def test_delete_session_not_found_raises():
+async def test_delete_session_emits_session_deleted_event():
+    sessions = {"sesn_del": _make_session(status="idle")}
+    provisioner = FakeProvisioner()
+    uc, store, bus = _make_uc(sessions, provisioner)
+    await uc.execute("sesn_del")
+    assert store.appended == [("sesn_del", "session.deleted", {"final_status": "idle"})]
+    assert len(bus.published) == 1
+    assert bus.published[0].type == "session.deleted"
+    assert bus.published[0].data == {"final_status": "idle"}
+
+
+async def test_delete_session_not_found_raises():
     sessions: dict = {}
     provisioner = FakeProvisioner()
-    uc = DeleteSessionUseCase(
-        provisioner=provisioner,
-        sessions_index=sessions,
-    )
+    uc, _, _ = _make_uc(sessions, provisioner)
     with pytest.raises(SessionNotFound):
-        uc.execute("sesn_missing")
+        await uc.execute("sesn_missing")
