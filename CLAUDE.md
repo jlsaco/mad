@@ -24,6 +24,8 @@ Project conventions and hard rules for anyone (human or Claude) working in this 
 
 8. **Events module is observability only.** `mad.core.events` exposes Mad's event vocabulary verbatim over a cross-session SSE + query surface — it does NOT translate, classify, dispatch, or otherwise act on events. No webhook receivers, no schedulers, no orchestration belong here; those go in a separate `core/orchestration/` module when concrete external payloads exist. Scope boundary and the rationale (vocabulary verbatim, slow-subscriber disconnect, deferred translation) live in [ADR-0004](docs/adr/0004-events-module-vocabulary-and-scope.md).
 
+9. **`EventEmitter.emit()` is the single write path to the session event log.** Use cases receive `EventEmitter` as an injected dependency and call `emit()`. They MUST NOT call `SessionRepository.append_event` or `EventBus.publish` directly. Outbound adapters (e.g. launcher callback) receive an `emit` callable supplied by the use case; inbound adapters (SSE, query) only subscribe or query — they NEVER write. Rationale and full scope live in [ADR-0007](docs/adr/0007-single-write-gateway-event-emitter.md).
+
 ## Commits and PRs
 
 | Command | Purpose |
@@ -73,6 +75,7 @@ Load-bearing decisions are recorded as ADRs in `docs/adr/` — see `docs/adr/REA
 - [ADR-0004](docs/adr/0004-events-module-vocabulary-and-scope.md) — events module vocabulary, scope, deferred translation, and removal of the legacy per-session stream.
 - [ADR-0005](docs/adr/0005-uuidv7-event-id.md) — UUIDv7 `event_id` for `Last-Event-ID` catch-up.
 - [ADR-0006](docs/adr/0006-multi-tenancy-deferred.md) — multi-tenancy deferred to a future module.
+- [ADR-0007](docs/adr/0007-single-write-gateway-event-emitter.md) — `EventEmitter` as the single write gateway; `EventStore` port; `CreateSessionUseCase` made async.
 
 ## Key files
 
@@ -81,11 +84,13 @@ Load-bearing decisions are recorded as ADRs in `docs/adr/` — see `docs/adr/REA
 - `docs/sandbox-bwrap.md` — operator's guide for hardening the sandbox with bubblewrap.
 - `pyproject.toml` — package metadata, dependencies, build backend, and the `mad` console script. Single source of truth for `pip install -e .`.
 - `src/mad/adapters/inbound/http/app.py` — `create_app(store=..., session_repo=..., workspace_provisioner=..., launcher_factory=...)` factory and router wiring.
-- `src/mad/adapters/inbound/http/dependencies.py` — composition root; builds production defaults for all outbound dependencies.
+- `src/mad/adapters/inbound/http/dependencies.py` — composition root; builds production defaults for all outbound dependencies, including `EventEmitter`.
 - `src/mad/core/domain/` — pure entities, value objects, domain exceptions (no I/O, no framework imports).
 - `src/mad/core/ports/outbound/` — `SessionRepository`, `WorkspaceProvisioner`, `AgentLauncher` Protocol interfaces.
 - `src/mad/core/use_cases/sessions/` — application logic: create, send message, get, list, delete.
 - `src/mad/core/use_cases/events/` — cross-session event surface: `QueryEventsUseCase` (`GET /v1/events`) and `StreamEventsUseCase` (`GET /v1/events/stream`).
+- `src/mad/core/events/ports/event_store.py` — narrow `EventStore` port: `append(session_id, type, data) -> Event`; the only persistence surface `EventEmitter` depends on.
+- `src/mad/core/events/emitter.py` — `EventEmitter` single write gateway; depends on `EventStore` + `EventBus`; every use case calls `emit()` here, never the underlying ports directly (hard rule 9).
 - `src/mad/adapters/outbound/persistence/` — `JsonlSessionRepository` (JSONL file log, hard rule 6) and `LocalWorkspaceProvisioner`.
 - `src/mad/adapters/outbound/agents/` — production `AgentLauncher` implementations (`claude_cli`) and the by-name `factory.get_launcher` extension point.
 - `src/mad/entry_points/cli.py` — uvicorn launcher, `mad` console script entry point.

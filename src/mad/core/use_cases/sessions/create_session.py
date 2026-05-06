@@ -12,7 +12,7 @@ from typing import Any
 
 from mad.core.domain.entities.session import Session
 from mad.core.domain.value_objects.mount_path import MountPath
-from mad.core.ports.outbound.session_repository import SessionRepository
+from mad.core.events.emitter import EventEmitter
 from mad.core.ports.outbound.workspace_provisioner import WorkspaceProvisioner
 
 
@@ -49,17 +49,17 @@ class CreateSessionUseCase:
 
     def __init__(
         self,
-        repo: SessionRepository,
         provisioner: WorkspaceProvisioner,
         sessions_index: dict[str, Session],
         idempotency_index: dict[str, str],
+        emitter: EventEmitter,
     ) -> None:
-        self._repo = repo
         self._provisioner = provisioner
         self._sessions = sessions_index
         self._idempotency = idempotency_index
+        self._emitter = emitter
 
-    def execute(self, payload: CreateSessionInput) -> CreateSessionOutput:
+    async def execute(self, payload: CreateSessionInput) -> CreateSessionOutput:
         # Idempotency check
         if payload.idempotency_key and payload.idempotency_key in self._idempotency:
             existing_id = self._idempotency[payload.idempotency_key]
@@ -76,7 +76,9 @@ class CreateSessionUseCase:
         session_id = "sesn_" + uuid.uuid4().hex[:12]
         workspace: Path = self._provisioner.create(session_id)
 
-        self._repo.append_event(session_id, "session.created", {"agent": payload.agent["name"]})
+        await self._emitter.emit(
+            session_id, "session.created", {"agent": payload.agent["name"]}
+        )
 
         resources_mounted: list[dict[str, Any]] = []
         for res in payload.resources:

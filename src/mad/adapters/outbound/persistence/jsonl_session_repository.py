@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from mad.core.events.domain.event import Event, event_from_persisted
 from mad.core.events.domain.event_id import new_event_id
 
 SESSIONS_DIR = Path("sessions")
@@ -71,6 +72,16 @@ class JsonlSessionRepository:
     ) -> dict:
         """Append an event and return the serialised event dict."""
         return emit(session_id, event_type, data)
+
+    def append(
+        self,
+        session_id: str,
+        type: str,
+        data: dict[str, Any] | None = None,
+    ) -> Event:
+        """Satisfy ``EventStore`` — persist and return a typed ``Event``."""
+        raw = self.append_event(session_id, type, data)
+        return event_from_persisted(raw, session_id)
 
     def read_events(self, session_id: str) -> list[dict]:
         """Return all events recorded for the session."""

@@ -12,16 +12,14 @@ to the injected ``EventBus`` so the cross-session observability surface
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from mad.core.domain.entities.session import Session
 from mad.core.domain.exceptions.base import SessionNotFound
-from mad.core.events.domain.event import event_from_persisted
-from mad.core.events.ports.event_bus import EventBus
-from mad.core.ports.outbound.session_repository import SessionRepository
+from mad.core.events.emitter import EventEmitter
 from mad.core.use_cases.sessions.auto_sync_prompt import build_auto_sync_prompt
 
 
@@ -43,53 +41,45 @@ class SendUserMessageUseCase:
 
     def __init__(
         self,
-        repo: SessionRepository,
         sessions_index: dict[str, Session],
         get_launcher: Callable[[str], Any],
-        event_bus: EventBus,
+        emitter: EventEmitter,
     ) -> None:
-        self._repo = repo
         self._sessions = sessions_index
         self._get_launcher = get_launcher
-        self._event_bus = event_bus
+        self._emitter = emitter
 
     def execute(self, payload: SendUserMessageInput) -> None:
         """Validate and schedule the agent run. Returns immediately."""
         if payload.session_id not in self._sessions:
             raise SessionNotFound(payload.session_id)
         session = self._sessions[payload.session_id]
-        event_dict = self._repo.append_event(
-            payload.session_id, "user.message", {"content": payload.content}
-        )
-        # Fire-and-forget publish: execute() is sync but FastAPI's event
-        # loop is running, so create_task is safe.
+        # Fire-and-forget: emitter handles both persistence and publish.
         asyncio.create_task(
-            self._event_bus.publish(
-                event_from_persisted(event_dict, payload.session_id)
+            self._emitter.emit(
+                payload.session_id, "user.message", {"content": payload.content}
             )
         )
         asyncio.create_task(
             _run_launcher(
-                repo=self._repo,
                 session=session,
                 session_id=payload.session_id,
                 prompt=payload.content,
                 get_launcher=self._get_launcher,
-                event_bus=self._event_bus,
+                emitter=self._emitter,
             )
         )
 
 
 async def _run_launcher(
-    repo: SessionRepository,
     session: Session,
     session_id: str,
     prompt: str,
     get_launcher: Callable[[str], Any],
-    event_bus: EventBus,
+    emitter: EventEmitter,
 ) -> None:
     """Internal coroutine: run the launcher and handle lifecycle events."""
-    await _emit(repo, session, session_id, event_bus, "session.status_running")
+    await emitter.emit(session_id, "session.status_running")
     session.mark_running()
 
     tokens_to_redact = _collect_tokens(session)
@@ -103,7 +93,7 @@ async def _run_launcher(
             if data and tokens_to_redact
             else data
         )
-        await _emit(repo, session, session_id, event_bus, event_type, redacted_data)
+        await emitter.emit(session_id, event_type, redacted_data)
         if event_type == "session.status_idle":
             session.mark_idle()
         elif event_type == "session.error":
@@ -113,14 +103,7 @@ async def _run_launcher(
         await launcher.run(prompt=prompt, workspace=workspace, emit=emit)
     except Exception as exc:
         if session.status == "running":
-            await _emit(
-                repo,
-                session,
-                session_id,
-                event_bus,
-                "session.error",
-                {"error": str(exc)},
-            )
+            await emitter.emit(session_id, "session.error", {"error": str(exc)})
             session.mark_error()
 
     # Post-run auto-sync (issue #8): always launch a second agent run in
@@ -133,29 +116,10 @@ async def _run_launcher(
         auto_sync_prompt = build_auto_sync_prompt(session_id, session.base_branch)
         await launcher.run(prompt=auto_sync_prompt, workspace=workspace, emit=emit)
     except Exception as exc:
-        await _emit(
-            repo,
-            session,
-            session_id,
-            event_bus,
-            "session.error",
-            {"error": f"auto-sync failed: {exc}"},
+        await emitter.emit(
+            session_id, "session.error", {"error": f"auto-sync failed: {exc}"}
         )
         session.mark_error()
-
-
-async def _emit(
-    repo: SessionRepository,
-    session: Session,
-    session_id: str,
-    event_bus: EventBus,
-    event_type: str,
-    data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Append event to log and publish to the event bus."""
-    event_dict = repo.append_event(session_id, event_type, data)
-    await event_bus.publish(event_from_persisted(event_dict, session_id))
-    return event_dict
 
 
 def _collect_tokens(session: Session) -> list[str]:

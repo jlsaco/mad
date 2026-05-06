@@ -13,6 +13,7 @@ from mad.adapters.inbound.http.routes.sessions import router as sessions_router
 from mad.adapters.outbound.agents import factory
 from mad.adapters.outbound.persistence.jsonl_session_repository import ensure_sessions_dir
 from mad.core.domain.exceptions.base import PathTraversalError, SessionNotFound
+from mad.core.events.emitter import EventEmitter
 from mad.core.events.ports.event_bus import EventBus
 from mad.core.events.ports.event_log_query import EventLogQuery
 from mad.core.ports.outbound.agent_launcher import AgentLauncher
@@ -28,6 +29,7 @@ def create_app(
     launcher_factory: Callable[[str], AgentLauncher] | None = None,
     event_bus: EventBus | None = None,
     event_log_query: EventLogQuery | None = None,
+    event_emitter: EventEmitter | None = None,
 ) -> FastAPI:
     """Build a FastAPI app with injected dependencies.
 
@@ -40,6 +42,7 @@ def create_app(
     - ``LocalWorkspaceProvisioner`` — local temp-dir workspace management.
     - ``InMemoryEventBus`` — asyncio fanout for live event subscribers.
     - ``JsonlEventLogQuery`` — read-side query over the same JSONL log.
+    - ``EventEmitter`` — single write gateway (EventStore + EventBus).
 
     Routes delegate to use cases from ``mad.core.use_cases.sessions.*``
     and ``mad.core.events.use_cases.*``.
@@ -57,6 +60,7 @@ def create_app(
         _default_provisioner,
         _default_event_bus,
         _default_event_log_query,
+        _default_event_emitter,
     ) = build_dependencies()
     app.state.store = store if store is not None else _default_store
     app.state.session_repo = session_repo if session_repo is not None else _default_repo
@@ -70,6 +74,7 @@ def create_app(
     app.state.event_log_query = (
         event_log_query if event_log_query is not None else _default_event_log_query
     )
+    app.state.event_emitter = event_emitter if event_emitter is not None else _default_event_emitter
 
     @app.exception_handler(PathTraversalError)
     async def _path_traversal_handler(request: Request, exc: PathTraversalError) -> JSONResponse:

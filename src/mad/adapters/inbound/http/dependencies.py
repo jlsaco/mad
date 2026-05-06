@@ -16,6 +16,7 @@ from mad.adapters.outbound.persistence.jsonl_session_repository import (
 from mad.adapters.outbound.persistence.local_workspace_provisioner import (
     LocalWorkspaceProvisioner,
 )
+from mad.core.events.emitter import EventEmitter
 from mad.core.events.ports.event_bus import EventBus
 from mad.core.events.ports.event_log_query import EventLogQuery
 from mad.core.ports.outbound.session_repository import SessionRepository
@@ -29,12 +30,17 @@ def build_dependencies() -> tuple[
     WorkspaceProvisioner,
     EventBus,
     EventLogQuery,
+    EventEmitter,
 ]:
     """Return the production defaults for every injected port."""
+    repo = JsonlSessionRepository()
+    bus = InMemoryEventBus()
+    emitter = EventEmitter(store=repo, bus=bus)
     return (
         SessionStore(),
-        JsonlSessionRepository(),
+        repo,
         LocalWorkspaceProvisioner(),
-        InMemoryEventBus(),
+        bus,
         JsonlEventLogQuery(),
+        emitter,
     )

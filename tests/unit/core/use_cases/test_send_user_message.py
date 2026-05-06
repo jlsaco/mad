@@ -7,11 +7,16 @@ via integration tests.
 from __future__ import annotations
 
 import asyncio
+import datetime
+from typing import Any
+from uuid import UUID
 
 import pytest
 
 from mad.core.domain.entities.session import Session
 from mad.core.domain.exceptions.base import SessionNotFound
+from mad.core.events.domain.event import Event
+from mad.core.events.emitter import EventEmitter
 from mad.core.use_cases.sessions.send_user_message import (
     SendUserMessageInput,
     SendUserMessageUseCase,
@@ -19,20 +24,45 @@ from mad.core.use_cases.sessions.send_user_message import (
 )
 from support.events import FakeEventBus
 
+_EPOCH = datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC)
+_NULL_UUID = UUID("00000000-0000-0000-0000-000000000000")
+
 
 class FakeRepo:
+    """In-memory EventStore double.
+
+    Satisfies both the old ``append_event`` interface (used in assertions)
+    and the new ``EventStore.append`` interface consumed by ``EventEmitter``.
+    """
+
     def __init__(self):
         self.events: list[dict] = []
 
-    def append_event(self, session_id, event_type, data=None):
+    def append_event(self, session_id: str, event_type: str, data: dict | None = None) -> dict:
         event = {"type": event_type, **(data or {})}
         self.events.append(event)
         return event
 
-    def read_events(self, session_id):
+    def append(
+        self,
+        session_id: str,
+        type: str,
+        data: dict[str, Any] | None = None,
+    ) -> Event:
+        """EventStore.append — persist and return a typed Event."""
+        raw = self.append_event(session_id, type, data)
+        return Event(
+            event_id=_NULL_UUID,
+            session_id=session_id,
+            type=type,
+            data=data or {},
+            timestamp=_EPOCH,
+        )
+
+    def read_events(self, session_id: str) -> list[dict]:
         return self.events
 
-    def exists(self, session_id):
+    def exists(self, session_id: str) -> bool:
         return True
 
 
@@ -45,14 +75,18 @@ def _make_session(session_id="sesn_msg", tokens=None):
     )
 
 
+def _make_uc(sessions, get_launcher, repo, bus):
+    emitter = EventEmitter(store=repo, bus=bus)
+    return SendUserMessageUseCase(
+        sessions_index=sessions,
+        get_launcher=get_launcher,
+        emitter=emitter,
+    )
+
+
 def test_send_message_session_not_found():
     sessions: dict = {}
-    uc = SendUserMessageUseCase(
-        repo=FakeRepo(),
-        sessions_index=sessions,
-        get_launcher=lambda name: None,
-        event_bus=FakeEventBus(),
-    )
+    uc = _make_uc(sessions, lambda name: None, FakeRepo(), FakeEventBus())
     with pytest.raises(SessionNotFound):
         uc.execute(SendUserMessageInput(session_id="sesn_missing", content="hi"))
 
@@ -71,12 +105,7 @@ async def test_send_message_runs_launcher_and_redacts_tokens():
             await emit("agent.output", {"line": f"leak {token} bye"})
             await emit("session.status_idle", {"stop_reason": "end_turn"})
 
-    uc = SendUserMessageUseCase(
-        repo=repo,
-        sessions_index=sessions,
-        get_launcher=lambda name: ScriptedLauncher(),
-        event_bus=bus,
-    )
+    uc = _make_uc(sessions, lambda name: ScriptedLauncher(), repo, bus)
 
     uc.execute(SendUserMessageInput(session_id="sesn_msg", content="hello"))
     # Wait until the background task finishes (two launcher runs = two status_idle).
@@ -124,12 +153,7 @@ async def test_post_run_auto_sync_invokes_second_launcher_run():
             calls.append(prompt)
             await emit("session.status_idle", {"stop_reason": "end_turn"})
 
-    uc = SendUserMessageUseCase(
-        repo=repo,
-        sessions_index=sessions,
-        get_launcher=lambda name: RecordingLauncher(),
-        event_bus=bus,
-    )
+    uc = _make_uc(sessions, lambda name: RecordingLauncher(), repo, bus)
 
     uc.execute(SendUserMessageInput(session_id="sesn_msg", content="hello"))
     deadline = asyncio.get_event_loop().time() + 2.0
@@ -159,12 +183,7 @@ async def test_post_run_auto_sync_runs_even_when_primary_fails():
                 raise RuntimeError("primary boom")
             await emit("session.status_idle", {"stop_reason": "end_turn"})
 
-    uc = SendUserMessageUseCase(
-        repo=repo,
-        sessions_index=sessions,
-        get_launcher=lambda name: FlakyLauncher(),
-        event_bus=bus,
-    )
+    uc = _make_uc(sessions, lambda name: FlakyLauncher(), repo, bus)
 
     uc.execute(SendUserMessageInput(session_id="sesn_msg", content="hi"))
     deadline = asyncio.get_event_loop().time() + 2.0
@@ -190,12 +209,7 @@ async def test_post_run_auto_sync_failure_emits_session_error():
                 return
             raise RuntimeError("sync boom")
 
-    uc = SendUserMessageUseCase(
-        repo=repo,
-        sessions_index=sessions,
-        get_launcher=lambda name: AutoSyncBoom(),
-        event_bus=bus,
-    )
+    uc = _make_uc(sessions, lambda name: AutoSyncBoom(), repo, bus)
 
     uc.execute(SendUserMessageInput(session_id="sesn_msg", content="hi"))
     deadline = asyncio.get_event_loop().time() + 2.0
@@ -219,12 +233,7 @@ async def test_send_message_records_session_error_when_launcher_raises():
         async def run(self, prompt, workspace, emit):
             raise RuntimeError("kaboom")
 
-    uc = SendUserMessageUseCase(
-        repo=repo,
-        sessions_index=sessions,
-        get_launcher=lambda name: BoomLauncher(),
-        event_bus=bus,
-    )
+    uc = _make_uc(sessions, lambda name: BoomLauncher(), repo, bus)
 
     uc.execute(SendUserMessageInput(session_id="sesn_msg", content="hi"))
     deadline = asyncio.get_event_loop().time() + 2.0
@@ -253,12 +262,7 @@ async def test_publishes_every_appended_event_to_the_event_bus():
             await emit("agent.output", {"line": "hi"})
             await emit("session.status_idle", {"stop_reason": "end_turn"})
 
-    uc = SendUserMessageUseCase(
-        repo=repo,
-        sessions_index=sessions,
-        get_launcher=lambda name: ScriptedLauncher(),
-        event_bus=bus,
-    )
+    uc = _make_uc(sessions, lambda name: ScriptedLauncher(), repo, bus)
 
     uc.execute(SendUserMessageInput(session_id="sesn_msg", content="please"))
     deadline = asyncio.get_event_loop().time() + 2.0

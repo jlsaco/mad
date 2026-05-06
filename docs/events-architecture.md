@@ -12,11 +12,14 @@ flowchart TD
 
     subgraph Core ["mad.core"]
         SendMsg["SendUserMessageUseCase"]
+        CreateSession["CreateSessionUseCase"]
         QueryEvents["QueryEventsUseCase"]
         StreamEvents["StreamEventsUseCase"]
+        Emitter["EventEmitter\n(single write gateway)"]
 
         subgraph Ports ["Ports (Protocols)"]
             P_Bus["EventBus"]
+            P_Store["EventStore"]
             P_Query["EventLogQuery"]
             P_Repo["SessionRepository"]
             P_Launcher["AgentLauncher"]
@@ -40,13 +43,18 @@ flowchart TD
     Client --> R_Events_List --> QueryEvents
     Client --> R_Events_Stream --> StreamEvents
 
-    %% SendUserMessage → ports
-    SendMsg -->|"append_event"| P_Repo --> Repo --> JSONL
-    SendMsg -->|"publish(event)"| P_Bus --> Bus
+    %% Use cases → EventEmitter → ports
+    CreateSession -->|"emit(session.created)"| Emitter
+    SendMsg -->|"emit(...)"| Emitter
+    Emitter -->|"append"| P_Store --> Repo --> JSONL
+    Emitter -->|"publish(event)"| P_Bus --> Bus
     SendMsg -->|"run(prompt, emit)"| P_Launcher --> LauncherImpl --> Agent
 
     %% Agent devuelve output via callback emit()
     Agent -->|"stdout → emit(agent.output)"| SendMsg
+
+    %% SessionRepository also satisfies EventStore (one impl, two protocols)
+    Repo -.->|"satisfies EventStore"| P_Store
 
     %% Query/Stream → ports
     QueryEvents --> P_Query --> LogQuery --> JSONL
@@ -59,9 +67,11 @@ flowchart TD
 
 ## Flujos principales
 
-**Escritura** — El mensaje entra por HTTP, `SendUserMessage` persiste en JSONL, publica al bus,
-y le pasa el control al launcher externo. El launcher devuelve líneas de stdout via el callback
-`emit()`, que vuelve a pasar por el mismo ciclo.
+**Escritura** — Todos los eventos pasan por `EventEmitter.emit()` (regla dura 9). `EventEmitter`
+persiste en JSONL via `EventStore` y publica al bus via `EventBus`. `SendUserMessage` le pasa al
+launcher un callback `emit` que internamente llama al emitter; `CreateSession` hace lo mismo para
+`session.created`. El launcher devuelve líneas de stdout via el callback `emit(agent.output)`,
+que vuelve a pasar por el mismo ciclo.
 
 **Lectura histórica** — `GET /v1/events` va directo al JSONL via `JsonlEventLogQuery`,
 sin tocar el bus.

@@ -66,13 +66,13 @@ async def create_session(
     ]
 
     use_case = CreateSessionUseCase(
-        repo=_repo(request),
         provisioner=_provisioner(request),
         sessions_index=store.sessions,
         idempotency_index=store.idempotency,
+        emitter=request.app.state.event_emitter,
     )
 
-    output = use_case.execute(
+    output = await use_case.execute(
         CreateSessionInput(
             agent=agent,
             resources=resource_specs,
@@ -91,10 +91,9 @@ async def send_events(session_id: str, request: Request) -> dict:
     events = body.get("events", [])
 
     use_case = SendUserMessageUseCase(
-        repo=_repo(request),
         sessions_index=store.sessions,
         get_launcher=request.app.state.launcher_factory,
-        event_bus=request.app.state.event_bus,
+        emitter=request.app.state.event_emitter,
     )
 
     for event in events:
