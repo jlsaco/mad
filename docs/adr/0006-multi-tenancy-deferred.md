@@ -37,7 +37,7 @@ The decision will be revisited when **Mad itself gains tenants** — i.e. when s
   2. Both ports (`EventBus.subscribe`, `EventLogQuery.query`).
   3. Both adapters (`InMemoryEventBus` filter routing, `JsonlEventLogQuery` server-side filter).
   4. The HTTP routes (filter param, authorization check).
-  
+
   The work is mechanical and touches every layer of the events module. We accept this cost as a known future migration rather than pre-paying it speculatively.
 
 - Operators running multiple deployments today must isolate them at the deployment boundary (separate `make serve` instances, separate workspace dirs) rather than at the application boundary. This is the existing model and is not new.
