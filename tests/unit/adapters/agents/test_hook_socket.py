@@ -27,7 +27,7 @@ def test_default_falls_back_to_tmp_when_xdg_unset(monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     monkeypatch.delenv("MAD_HOOK_SOCKET", raising=False)
 
-    assert default_hook_socket_path() == "/tmp/mad/hooks.sock"  # noqa: S108
+    assert default_hook_socket_path() == "/tmp/mad/hooks.sock"
 
 
 def test_resolve_prefers_explicit_mad_hook_socket(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,11 +6,11 @@ import sys
 from pathlib import Path
 
 
-async def _chmod_when_ready(socket_path: str, timeout: float = 2.0) -> None:
+async def _chmod_when_ready(socket_path: str, deadline_seconds: float = 2.0) -> None:
     """Poll until the socket file appears, then tighten its permissions to 0o600."""
-    deadline = asyncio.get_event_loop().time() + timeout
+    deadline = asyncio.get_event_loop().time() + deadline_seconds
     while asyncio.get_event_loop().time() < deadline:
-        if Path(socket_path).exists():
+        if Path(socket_path).exists():  # noqa: ASYNC240 — local fs stat, no remote I/O
             os.chmod(socket_path, 0o600)
             return
         await asyncio.sleep(0.05)

@@ -164,9 +164,7 @@ def test_post_hook_scrubs_anthropic_token_inside_data(
     assert response.status_code == 202
     appended = fake_store.calls[0][2]
     assert appended is not None
-    assert leaked not in str(appended), (
-        f"raw token leaked into persisted data: {appended!r}"
-    )
+    assert leaked not in str(appended), f"raw token leaked into persisted data: {appended!r}"
     assert "[REDACTED]" in appended["command"], (
         f"expected [REDACTED] in command, got: {appended['command']!r}"
     )
@@ -192,9 +190,7 @@ def test_post_hook_scrubs_credential_keys(
     assert response.status_code == 202
     appended = fake_store.calls[0][2]
     assert appended is not None
-    assert appended["token"] == "[REDACTED]", (
-        f"top-level credential key not scrubbed: {appended!r}"
-    )
+    assert appended["token"] == "[REDACTED]", f"top-level credential key not scrubbed: {appended!r}"
     assert appended["nested"]["api_key"] == "[REDACTED]", (
         f"nested credential key not scrubbed: {appended['nested']!r}"
     )

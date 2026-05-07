@@ -22,7 +22,6 @@ from mad.adapters.outbound.persistence.local_workspace_provisioner import (
     LocalWorkspaceProvisioner,
 )
 
-
 _EXPECTED_HOOKS: frozenset[str] = frozenset(
     {
         "SessionStart",
@@ -50,9 +49,17 @@ def _make_bare_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "-C", str(seed), "add", "README.md"], check=True)
     subprocess.run(
         [
-            "git", "-C", str(seed),
-            "-c", "user.email=t@t", "-c", "user.name=t",
-            "commit", "-q", "-m", "init",
+            "git",
+            "-C",
+            str(seed),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            "init",
         ],
         check=True,
     )

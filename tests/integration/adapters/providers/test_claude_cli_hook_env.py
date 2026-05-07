@@ -62,7 +62,7 @@ async def test_subprocess_receives_mad_session_id_hook_socket_provider(
     dump_path = tmp_path / "env.json"
     fake_bin = _make_env_dump_bin(tmp_path, dump_path)
     monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
-    monkeypatch.setenv("MAD_HOOK_SOCKET", "/tmp/mad-test/hooks.sock")  # noqa: S108
+    monkeypatch.setenv("MAD_HOOK_SOCKET", "/tmp/mad-test/hooks.sock")
 
     await _run_capturing(
         ClaudeCLIProvider(),
@@ -101,9 +101,7 @@ async def test_run_does_not_mutate_callers_environment(
     fake_bin = _make_env_dump_bin(tmp_path, dump_path)
     monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
 
-    await _run_capturing(
-        ClaudeCLIProvider(), session_id="sesn_leak_check", workspace=tmp_path
-    )
+    await _run_capturing(ClaudeCLIProvider(), session_id="sesn_leak_check", workspace=tmp_path)
 
     assert "MAD_SESSION_ID" not in os.environ, "MAD_SESSION_ID leaked into parent env"
     assert "MAD_PROVIDER" not in os.environ, "MAD_PROVIDER leaked into parent env"

@@ -90,7 +90,7 @@ class LocalWorkspaceProvisioner:
         forward_sh_src = pkg.joinpath("forward.sh").read_bytes()
         forward_sh_dest = hooks_dir / "forward.sh"
         forward_sh_dest.write_bytes(forward_sh_src)
-        os.chmod(forward_sh_dest, 0o755)
+        os.chmod(forward_sh_dest, 0o755)  # noqa: S103 — claude-cli must execute the script
 
         settings_src = pkg.joinpath("settings.local.json").read_text(encoding="utf-8")
         settings_dest = local_path / ".claude" / "settings.local.json"
