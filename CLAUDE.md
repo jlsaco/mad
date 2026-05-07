@@ -24,7 +24,11 @@ Project conventions and hard rules for anyone (human or Claude) working in this 
 
 8. **Events module is observability only.** `mad.core.events` exposes Mad's event vocabulary verbatim over a cross-session SSE + query surface — it does NOT translate, classify, dispatch, or otherwise act on events. No webhook receivers, no schedulers, no orchestration belong here; those go in a separate `core/orchestration/` module when concrete external payloads exist. Scope boundary and the rationale (vocabulary verbatim, slow-subscriber disconnect, deferred translation) live in [ADR-0004](docs/adr/0004-events-module-vocabulary-and-scope.md).
 
-9. **`EventEmitter.emit()` is the single write path to the session event log.** Use cases receive `EventEmitter` as an injected dependency and call `emit()`. They MUST NOT call `SessionRepository.append_event` or `EventBus.publish` directly. Outbound adapters (e.g. launcher callback) receive an `emit` callable supplied by the use case; inbound adapters (SSE, query) only subscribe or query — they NEVER write. Rationale and full scope live in [ADR-0007](docs/adr/0007-single-write-gateway-event-emitter.md).
+9. **HTTP requests and responses MUST be strongly typed.** Every HTTP route exposes its inputs (request body, query params, headers) and outputs (response body) as Pydantic models or explicit primitives — never raw `request.json()` / `dict[str, Any]` for the body. This is what populates OpenAPI / `/docs` / Postman, what makes 422 validation automatic at the boundary, and what lets tests rely on the contract instead of guessing keys. Any new endpoint that accepts JSON MUST declare a `BaseModel` for the body; any endpoint that returns JSON SHOULD declare a `response_model`. Reviewers reject PRs that bypass this.
+
+10. **Tests must pass the seven heuristics in [`docs/testing-heuristics.md`](docs/testing-heuristics.md).** No happy-path test without a negative twin (rule 1). No `assert ... in (200, 202)` or `assert ... or ...` (rule 2). No `Fake*` redefined inline in a test file — fakes live in `tests/support/` (rule 3). No bare `time.sleep` followed by an assertion on call count (rule 7). Every new `POST`/`PUT` JSON endpoint gets an OpenAPI contract test (rule 5). Every new streaming endpoint gets an `httpx.AsyncClient` test (rule 6). The `/work` Step 7.5 runs a `write-test` ↔ `test-critic` loop (max 3 iterations) that enforces this mechanically; do not bypass it.
+
+11. **`EventEmitter.emit()` is the single write path to the session event log.** Use cases receive `EventEmitter` as an injected dependency and call `emit()`. They MUST NOT call `SessionRepository.append_event` or `EventBus.publish` directly. Outbound adapters (e.g. launcher callback) receive an `emit` callable supplied by the use case; inbound adapters (SSE, query) only subscribe or query — they NEVER write. Rationale and full scope live in [ADR-0007](docs/adr/0007-single-write-gateway-event-emitter.md).
 
 ## Commits and PRs
 
@@ -55,13 +59,16 @@ Project-level skills live in `.claude/skills/`. Invoke with `/skill-name` or via
 | Skill | Path | Purpose |
 |---|---|---|
 | `intake` | `.claude/skills/intake/SKILL.md` | Full issue intake pipeline: classify → search → refine → create. Embeds issue templates in `resources/templates/`. |
-| `work` | `.claude/skills/work/SKILL.md` | Full issue execution pipeline: read → branch → work → commit → PR. |
+| `work` | `.claude/skills/work/SKILL.md` | Full issue execution pipeline: read → branch → work → write-test ↔ test-critic loop → commit → PR. |
+| `write-test` | `.claude/skills/write-test/SKILL.md` | Auto-loaded when writing or modifying tests. Enforces the seven heuristics in `docs/testing-heuristics.md` (negative twins, single-contract assertions, fakes in `tests/support/`, OpenAPI + SSE contract tests, state-based polling). |
 
 Agents (spawned as subagents by the skills above):
 
 | Agent | Path | Purpose |
 |---|---|---|
 | `search-issues` | `.claude/agents/search-issues.md` | Read-only GitHub issue search: duplicates, related, blockers. Spawned by `/intake`. |
+| `write-test` | `.claude/agents/write-test.md` | Writes / fixes pytest tests under the heuristics. Spawned by `/work` Step 7.5; receives critic findings and addresses them without rewriting unrelated tests. Refuses to weaken tests. |
+| `test-critic` | `.claude/agents/test-critic.md` | Read-only mechanical reviewer. Applies the seven heuristics to the test diff and returns a structured PASS/FAIL verdict with per-finding `file:line` + rule number. Never edits, never runs pytest. |
 
 **Template sync rule.** `.claude/skills/intake/resources/templates/<type>.md` and `.github/ISSUE_TEMPLATE/<type>.yml` are mirrors. Changing one requires updating the other. The `resources/templates/` files are the canonical source; `.github/ISSUE_TEMPLATE/` files expose them in the GitHub web UI.
 
@@ -91,7 +98,7 @@ Load-bearing decisions are recorded as ADRs in `docs/adr/` — see `docs/adr/REA
 - `src/mad/core/sessions/store.py` — `SessionStore` (in-memory live-session index; re-exported from `mad.core.sessions`).
 - `src/mad/core/use_cases/events/` — cross-session event surface: `QueryEventsUseCase` (`GET /v1/events`) and `StreamEventsUseCase` (`GET /v1/events/stream`).
 - `src/mad/core/events/ports/event_store.py` — narrow `EventStore` port: `append(session_id, type, data) -> Event`; the only persistence surface `EventEmitter` depends on.
-- `src/mad/core/events/emitter.py` — `EventEmitter` single write gateway; depends on `EventStore` + `EventBus`; every use case calls `emit()` here, never the underlying ports directly (hard rule 9).
+- `src/mad/core/events/emitter.py` — `EventEmitter` single write gateway; depends on `EventStore` + `EventBus`; every use case calls `emit()` here, never the underlying ports directly (hard rule 11).
 - `src/mad/adapters/outbound/persistence/` — `JsonlSessionRepository` (JSONL file log, hard rule 6) and `LocalWorkspaceProvisioner`.
 - `src/mad/adapters/outbound/agents/` — production `AgentLauncher` implementations (`claude_cli`) and the by-name `factory.get_launcher` extension point.
 - `src/mad/entry_points/cli.py` — uvicorn launcher, `mad` console script entry point.
