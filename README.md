@@ -1,52 +1,107 @@
-# Mad About
+# Mad
 
 > That's mad!
 
-**M**ulti **A**gent **D**evelop — a multi-agent system designed to build software autonomously. It takes an idea and drives it end-to-end: from the first line of code to a working product.
+**M**ulti **A**gent **D**evelop — a self-hosted infrastructure layer that provisions isolated workspaces, clones a GitHub repository, and launches an external coding agent (Claude Code CLI today) against it. Each agent's stdout is streamed as `agent.output` Server-Sent Events on a per-session log, and a final `session.status_idle` (or `session.error`) event signals completion.
 
-## What is this?
+Mad is **infrastructure, not an orchestrator.** It does NOT parse tool calls, NOT execute tools, and NOT manage a conversation loop — those concerns belong to the external agent's own harness. Multiple sessions can run in parallel, each with its own agent process and its own event stream; what Mad does not do is coordinate them into a single autonomous "team."
 
-Mad About orchestrates a team of AI agents that collaborate to design, implement, test, and ship software without a human in the loop for every step. You give it a goal; it figures out the rest.
+The full scope contract lives in [`CLAUDE.md`](CLAUDE.md) ("What this project is" + hard rule 1).
 
 ## Status
 
-Early days. The first milestone is **Mad** — a self-hosted API that provisions workspaces, clones repos, and runs Claude agents autonomously against them.
+Early days — `0.x`. Single launcher provider (`claude_cli`); HTTP + SSE surface stable enough to build clients against; multi-tenancy deferred ([ADR-0006](docs/adr/0006-multi-tenancy-deferred.md)).
+
+## Requirements
+
+- Linux host (see `Operating System :: POSIX :: Linux` classifier)
+- Python ≥ 3.11
+- The `claude` CLI installed and on `PATH` (override the binary with `MAD_CLAUDE_CLI_BIN`; per-run timeout via `MAD_CLAUDE_CLI_TIMEOUT_S`)
+- A GitHub token with `repo` scope for cloning private repos (passed per-request, never persisted — see hard rule 2)
 
 ## Install
 
-Mad ships as a pip-installable Python package (`mad`). From a checkout:
+The distribution is published as `mad-bros`; the import package and console script are both `mad`:
 
 ```bash
-make install   # create venv + editable install with dev deps
-make test      # run the pytest suite
-make serve     # uvicorn factory (override HOST=/PORT= if needed)
-make help      # list every target
+pip install mad-bros
+mad serve            # uvicorn factory on 0.0.0.0:8000 by default
 ```
 
-All commands are wrapped by the `Makefile`; the raw equivalents live in `pyproject.toml` (the `mad` console script) and in the project documentation.
+From a checkout (development):
+
+```bash
+make install   # create venv + `pip install -e '.[dev]'`
+make test      # pytest -q
+make serve     # uvicorn mad.adapters.inbound.http.app:create_app --factory
+make help      # full target list
+```
+
+## Quickstart
+
+Create a session against a public repo and stream its events:
+
+```bash
+# 1. Create the session
+curl -sS -X POST http://localhost:8000/v1/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "repo_url": "https://github.com/octocat/Hello-World",
+        "prompt": "Summarize the README in one sentence.",
+        "agent": "claude_cli"
+      }'
+# → { "session_id": "...", "status": "running", ... }
+
+# 2. Stream the cross-session event log (Last-Event-ID resumable)
+curl -N http://localhost:8000/v1/events/stream
+```
+
+Each event on the stream is a JSON object with `event_id` (UUIDv7), `session_id`, `type`, and `data`. Representative types:
+
+| Type | Emitted when |
+|---|---|
+| `session.created` | Session row written, workspace provisioned |
+| `agent.output` | One line of stdout from the external agent |
+| `session.status_idle` | Agent exited 0 |
+| `session.error` | Agent exited non-zero or timed out |
+
+For private repos, pass `github_token` in the create-session body. Mad uses it once for `git clone` and immediately strips it from the remote URL ([hard rule 2](CLAUDE.md)).
 
 ## Project structure
 
+The package follows a hexagonal / ports-and-adapters layout — see [ADR-0003](docs/adr/0003-package-layout.md) for the rationale.
+
 ```
 mad/
-├── pyproject.toml          # package metadata, deps, `mad` console script
+├── pyproject.toml                     # package metadata, deps, `mad` console script
 ├── src/mad/
-│   ├── api/                # FastAPI app + routes (thin HTTP layer)
-│   │   ├── app.py          # create_app(store=...) factory
-│   │   └── routes/         # sessions, events, stream
-│   ├── core/               # domain — session log, workspace, security, SessionStore
-│   ├── agent/              # harness loop + tool execution
-│   ├── providers/          # LLMProvider protocol + claude_cli / anthropic_api / fake
-│   └── cli.py              # `mad` console entry-point
-└── tests/                  # pytest acceptance + security tests
+│   ├── core/                          # framework-free domain (no FastAPI, no subprocess)
+│   │   ├── sessions/                  # sessions bounded context (domain, ports, use_cases)
+│   │   └── events/                    # cross-session events (domain, ports, use_cases, emitter)
+│   ├── adapters/
+│   │   ├── inbound/http/              # FastAPI app factory + routes (sessions, events stream)
+│   │   └── outbound/                  # agents (claude_cli launcher), persistence (JSONL), events
+│   └── entry_points/cli.py            # `mad` console script (uvicorn launcher)
+└── tests/
+    ├── unit/                          # core + adapters in isolation
+    ├── integration/                   # HTTP + SSE end-to-end
+    └── support/                       # test-only doubles (e.g. ScriptedLauncher)
 ```
 
-Hard rules and conventions that govern every change live in [`CLAUDE.md`](CLAUDE.md).
+The architectural boundary (`mad.core` is framework-free and adapter-free) is enforced by `import-linter` — see hard rule 4 in [`CLAUDE.md`](CLAUDE.md).
+
+## Vision
+
+Today Mad runs one external agent per session. The longer-term direction is to use this same infrastructure as the substrate for multi-agent workflows — multiple coordinated sessions collaborating on a goal, each one an isolated workspace with its own event stream. Mad itself stays an infrastructure layer; orchestration, when it exists, will live in a separate module on top.
+
+The "Multi Agent Develop — takes an idea and ships it end-to-end" framing belongs to that future. The package today is the substrate, not the orchestrator.
 
 ## Documentation
 
-- [`docs/backlog.md`](docs/backlog.md) — known improvements deferred past v0.1.
-- [`docs/sandbox-bwrap.md`](docs/sandbox-bwrap.md) — hardening guide for the execution sandbox using bubblewrap.
+- [`docs/adr/`](docs/adr/) — Architecture Decision Records (start at `README.md`).
+- [`docs/backlog.md`](docs/backlog.md) — improvements deferred past v0.1.
+- [`docs/sandbox-bwrap.md`](docs/sandbox-bwrap.md) — operator's guide for hardening the sandbox with bubblewrap.
+- [`docs/testing-heuristics.md`](docs/testing-heuristics.md) — the eight heuristics every test must satisfy (hard rule 10).
 
 ## License
 
