@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.5.2 (2026-05-15)
+
+### Bug Fixes
+
+- **sse**: Emit periodic heartbeats and disable proxy buffering on /v1/events/stream (#38)
+  ([#38](https://github.com/jlsaco/mad/pull/38),
+  [`996d4fd`](https://github.com/jlsaco/mad/commit/996d4fd9f1862d1c44fc261d099590d242209d45))
+
+### Features
+
+- **http**: Add /v1/sessions/{id}/tasks endpoints for the task queue
+  ([`3dc8a4b`](https://github.com/jlsaco/mad/commit/3dc8a4b29ffaae5598298ba031662aa857a68bf1))
+- **http**: Add session cleanup endpoint and hide deleted by default (#37)
+  ([#37](https://github.com/jlsaco/mad/pull/37),
+  [`e3a27f3`](https://github.com/jlsaco/mad/commit/e3a27f3b831cda2db810ba0184e809ab3beb99f1))
+
+
 ## v0.5.1 (2026-05-09)
 
 ### Features
