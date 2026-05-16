@@ -1,6 +1,16 @@
 # CHANGELOG
 
 
+## v0.5.4 (2026-05-16)
+
+### Features
+
+- **deps**: Add mcp runtime dependency (>=1.0,<2)
+  ([`62bb08a`](https://github.com/jlsaco/mad/commit/62bb08a395ff0a2d3b05a970525bca942a4d0dc9))
+- **http**: Expose Mad as an MCP server mounted at /mcp
+  ([`0d1af76`](https://github.com/jlsaco/mad/commit/0d1af766d76a7af13e0c9f2483750e377c2d3363))
+
+
 ## v0.5.3 (2026-05-15)
 
 ### Features
