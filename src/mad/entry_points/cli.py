@@ -59,7 +59,7 @@ def main() -> None:
             elif arg == "--port":
                 port = int(next(it))
 
-        store, repo, provisioner, bus, query, emitter = build_dependencies()
+        store, repo, provisioner, bus, query, emitter, projection, clock = build_dependencies()
 
         public_app = create_app(
             store=store,
@@ -68,6 +68,8 @@ def main() -> None:
             event_bus=bus,
             event_log_query=query,
             event_emitter=emitter,
+            task_projection=projection,
+            clock=clock,
         )
         internal_app = create_internal_app(emitter)
 
