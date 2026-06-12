@@ -77,7 +77,7 @@ include = [
 exclude = [
   "venv",
   ".venv",
-  "sessions",
+  "/sessions",
   "tests/fixtures/tmp",
   "**/__pycache__",
 ]
