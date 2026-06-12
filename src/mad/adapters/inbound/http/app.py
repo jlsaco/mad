@@ -17,6 +17,7 @@ from mad.adapters.outbound.persistence.jsonl_session_repository import ensure_se
 from mad.core.events.emitter import EventEmitter
 from mad.core.events.ports.event_bus import EventBus
 from mad.core.events.ports.event_log_query import EventLogQuery
+from mad.core.orchestration.domain.deployment_policy import DeploymentDispatchPolicy
 from mad.core.orchestration.domain.dispatch_policy import InvalidDispatchPolicy
 from mad.core.orchestration.domain.exceptions.base import (
     SessionHasInFlightTask,
@@ -25,6 +26,9 @@ from mad.core.orchestration.domain.exceptions.base import (
 )
 from mad.core.orchestration.domain.ordering import InvalidPriority
 from mad.core.orchestration.ports.clock import Clock
+from mad.core.orchestration.use_cases.deployment_dispatch_policy import (
+    bootstrap_deployment_policy,
+)
 from mad.core.orchestration.use_cases.dispatcher import Dispatcher
 from mad.core.orchestration.use_cases.rehydrate_pending_sessions import (
     rehydrate_pending_sessions,
@@ -49,6 +53,7 @@ def create_app(
     dispatcher: Dispatcher | None = None,
     clock: Clock | None = None,
     dispatcher_tick_interval_s: float | None = None,
+    deployment_policy: DeploymentDispatchPolicy | None = None,
 ) -> FastAPI:
     """Build a FastAPI app with injected dependencies."""
 
@@ -61,6 +66,7 @@ def create_app(
         _default_event_emitter,
         _default_projection,
         _default_clock,
+        _default_deployment_policy,
     ) = build_dependencies()
 
     final_store = store if store is not None else _default_store
@@ -77,6 +83,9 @@ def create_app(
     )
     final_projection = task_projection if task_projection is not None else _default_projection
     final_clock: Clock = clock if clock is not None else _default_clock
+    final_deployment_policy = (
+        deployment_policy if deployment_policy is not None else _default_deployment_policy
+    )
 
     if event_emitter is not None:
         final_event_emitter = event_emitter
@@ -99,6 +108,7 @@ def create_app(
             "sessions_index": final_store.sessions,
             "get_launcher": final_launcher_factory,
             "clock": final_clock,
+            "deployment_policy": final_deployment_policy,
         }
         if dispatcher_tick_interval_s is not None:
             dispatcher_kwargs["tick_interval_s"] = dispatcher_tick_interval_s
@@ -119,6 +129,8 @@ def create_app(
         launcher_factory=final_launcher_factory,
         event_emitter=final_event_emitter,
         task_projection=final_projection,
+        deployment_policy=final_deployment_policy,
+        event_log_query=final_event_log_query,
     )
     mcp_asgi_app = mcp_server.streamable_http_app()
 
@@ -133,6 +145,10 @@ def create_app(
         # queued work never resumes after a restart until each owning
         # session is individually fetched.
         rehydrate_pending_sessions(final_projection, final_repo, final_store.sessions)
+        # Rebuild the deployment-wide default policy from its reserved log
+        # so an operator-set default survives a restart (issue #45,
+        # hard rule 6) before the dispatcher evaluates any session.
+        bootstrap_deployment_policy(final_deployment_policy, final_repo)
         await final_dispatcher.start()
         async with mcp_server.session_manager.run():
             try:
@@ -151,6 +167,7 @@ def create_app(
     app.state.task_projection = final_projection
     app.state.dispatcher = final_dispatcher
     app.state.clock = final_clock
+    app.state.deployment_policy = final_deployment_policy
     app.state.mcp_server = mcp_server
 
     @app.exception_handler(PathTraversalError)

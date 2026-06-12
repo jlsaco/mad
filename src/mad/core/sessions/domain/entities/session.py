@@ -13,7 +13,6 @@ from typing import Any
 
 from mad.core.orchestration.domain.dispatch_policy import (
     DispatchPolicy,
-    ImmediatePolicy,
 )
 from mad.core.orchestration.domain.ordering import DEFAULT_PRIORITY
 
@@ -44,7 +43,7 @@ class Session:
     resources_mounted: list[dict[str, Any]] = field(default_factory=list)
     response: dict[str, Any] = field(default_factory=dict)
     tokens_to_redact: list[str] = field(default_factory=list, repr=False)
-    dispatch_policy: DispatchPolicy = field(default_factory=ImmediatePolicy, repr=False)
+    dispatch_policy: DispatchPolicy | None = field(default=None, repr=False)
     manual_drain_remaining: int = field(default=0, repr=False)
     # Cross-session dispatch priority (issue #46): higher dispatches
     # first; [1, 10]; 1 (lowest) when never set, so an explicitly

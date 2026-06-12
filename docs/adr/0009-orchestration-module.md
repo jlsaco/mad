@@ -134,7 +134,21 @@ The Clock port from §8 lands its consumers. Three policies on `Session.dispatch
 
 **Trigger semantics.** `POST /trigger` is `manual`-only. It captures the current queue length and sets `manual_drain_remaining` to that count. New tasks enqueued after the trigger but before the drain finishes do NOT join the drain (operator must trigger again). Returns `409 Conflict` in `immediate` / `work_window` modes — the policy already dispatches automatically.
 
-### 10. Cross-session priority, startup rehydration, and the global queue view (amendment, 2026-06-12 — issue #46)
+### 10. Deployment-wide default policy (amendment, 2026-06-12 — issue #45)
+
+§9 made every session carry its own `dispatch_policy`, forcing operators to repeat the same schedule on every new session. This amendment adds a single process-global default that sessions inherit, without introducing a `Workspace` entity (ADR-0006 multi-tenancy stays deferred — "workspace-level" here means one default for the whole instance, exposed at the bare `/v1/dispatch_policy`).
+
+- **Optional override + live inheritance.** `Session.dispatch_policy` becomes `DispatchPolicy | None` (`None` = inherit). The effective policy is resolved at *each* dispatch evaluation — `resolve_effective_policy(session, deployment) = session.dispatch_policy or deployment.default or ImmediatePolicy()`. Changing the deployment default takes effect immediately for every inheriting session; there is no snapshot at create time. A pinned per-session policy always wins over the default.
+
+- **Singleton holder.** `DeploymentDispatchPolicy` is a mutable holder (mirrors `SessionStore`), built once in the composition root and injected by reference into both the HTTP routes and the `Dispatcher`, so a `PUT` is observed live by the running loop.
+
+- **`dispatch_policy.default.updated`.** `PUT /v1/dispatch_policy` emits this under a reserved session id (`__deployment__`) so the singleton is rebuilt on restart by replaying that log (`bootstrap_deployment_policy`, run in the app lifespan). The reserved id starts with `__` and is filtered out of `list_session_ids` so it never surfaces as a real session.
+
+- **`dispatch_policy.cleared`.** `DELETE /v1/sessions/{id}/dispatch_policy` clears the per-session override (back to inheriting) and emits this; replay resets `Session.dispatch_policy` to `None`. Clearing is idempotent — a DELETE on a session that already inherits is a 200 no-op, not a 409.
+
+- **Manual-trigger interaction.** `POST /trigger` and `manual_drain_remaining` stay per session even when the effective policy is inherited: a `manual` deployment default is drained per session, and the trigger resolves the *effective* policy so an inheriting session can be drained (override `immediate` over a `manual` default still 409s).
+
+### 11. Cross-session priority, startup rehydration, and the global queue view (amendment, 2026-06-12 — issue #46)
 
 **Startup rehydration of pending-work sessions.** §3's projection bootstrap repaired the *task* state across restarts, but nothing ever repopulated the in-memory session index — so after any restart the dispatcher walked an empty index and queued work silently never resumed (and §5's orphan recovery, which walks the same index, never fired). The app lifespan now calls `rehydrate_pending_sessions` after `bootstrap_from_log` and before `dispatcher.start()`: every session the projection reports via the new cross-session `TaskQueue.pending_session_ids()` read (≥1 queued or in-flight task) is rebuilt into the index with the existing `rehydrate_from_events` replay. Only pending-work sessions are rehydrated — idle history stays lazy-loaded. No parallel store; the JSONL log remains the sole source of truth. Orphan recovery additionally applies its `task.failed` event to the projection directly, because the bus subscription starts *after* recovery — without that, the projection holds a phantom `in_flight` for the process lifetime and the queue view disagrees with the dispatcher.
 
@@ -149,6 +163,8 @@ The Clock port from §8 lands its consumers. Three policies on `Session.dispatch
 **Global queue view.** `GET /v1/queue` (read surface in `core/orchestration/`, NOT `core/events/` — ADR-0004 / hard rule 8 keeps the events module observability-only) returns three buckets, strongly typed: `in_flight` (the single dispatched task, or null), `ready` (queued tasks of currently-dispatchable sessions in true dispatch order — `ready[0]` is genuinely next), and `scheduled` (queued tasks of window-gated or manual sessions, each with a `reason`: `window` + the next computed window opening, or `manual`; ordered by `(scheduled_for, -priority)`). Policy groups are never flattened into one priority-sorted list — a high-priority session whose window is closed appears in `scheduled`, never as "next".
 
 **Known consequence — starvation (deliberate, not solved).** One dispatcher (§4) plus strict priority means a high-priority session receiving a continuous stream of tasks indefinitely starves lower-priority sessions. Accepted for a single-operator tool; there is **no fairness or aging mechanism in v1**. Revisit alongside cross-session parallelism if multi-tenant or multi-operator use makes starvation a practical problem.
+
+**Interaction with §10 (effective policy).** Eligibility, the `ready`/`scheduled` partition, and the `scheduled` reasons are all computed against the *effective* policy (`resolve_effective_policy(session, deployment)`), exactly as the dispatcher evaluates it — the queue view and the dispatcher share both the ordering function and the policy resolution, so they can never disagree about what dispatches next or why a task is gated.
 
 ## Consequences
 
