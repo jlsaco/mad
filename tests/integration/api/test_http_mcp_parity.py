@@ -43,6 +43,10 @@ _ROUTE_TO_TOOL: dict[tuple[str, str], str] = {
     ("GET", "/v1/dispatch_policy"): "mad_get_deployment_dispatch_policy",
     ("PUT", "/v1/dispatch_policy"): "mad_set_deployment_dispatch_policy",
     ("GET", "/v1/events"): "mad_query_events",
+    ("GET", "/v1/providers/models"): "mad_list_provider_models",
+    ("GET", "/v1/model"): "mad_get_deployment_model",
+    ("PUT", "/v1/model"): "mad_set_deployment_model",
+    ("DELETE", "/v1/model"): "mad_clear_deployment_model",
 }
 
 

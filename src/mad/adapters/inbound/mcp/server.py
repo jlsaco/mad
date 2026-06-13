@@ -44,6 +44,11 @@ from mad.adapters.inbound.http.routes.orchestration import (
     TaskResponse,
     TriggerManualDispatchResponse,
 )
+from mad.adapters.inbound.http.routes.providers import (
+    DeploymentModelResponse,
+    ProviderModelsResponse,
+    SetDeploymentModelRequest,
+)
 from mad.adapters.inbound.http.routes.sessions import (
     CleanupSessionsRequest,
     CleanupSessionsResponse,
@@ -58,6 +63,8 @@ from mad.core.events.ports.event_log_query import EventLogQuery
 from mad.core.events.use_cases.query_events import QueryEventsInput, QueryEventsUseCase
 from mad.core.orchestration.domain.deployment_policy import DeploymentDispatchPolicy
 from mad.core.orchestration.domain.dispatch_policy import policy_from_dict, policy_to_dict
+from mad.core.orchestration.domain.model_config import DeploymentModelConfig
+from mad.core.orchestration.ports.model_catalog import ModelCatalog
 from mad.core.orchestration.use_cases.cancel_task import CancelTaskInput, CancelTaskUseCase
 from mad.core.orchestration.use_cases.clear_dispatch_policy import (
     ClearDispatchPolicyInput,
@@ -68,7 +75,15 @@ from mad.core.orchestration.use_cases.deployment_dispatch_policy import (
     SetDeploymentDispatchPolicyInput,
     SetDeploymentDispatchPolicyUseCase,
 )
+from mad.core.orchestration.use_cases.deployment_model_config import (
+    ClearDeploymentModelUseCase,
+    DeploymentModelOutput,
+    GetDeploymentModelUseCase,
+    SetDeploymentModelInput,
+    SetDeploymentModelUseCase,
+)
 from mad.core.orchestration.use_cases.enqueue_task import EnqueueTaskInput, EnqueueTaskUseCase
+from mad.core.orchestration.use_cases.list_provider_models import ListProviderModelsUseCase
 from mad.core.orchestration.use_cases.list_tasks import ListTasksUseCase
 from mad.core.orchestration.use_cases.trigger_manual_dispatch import (
     TriggerManualDispatchInput,
@@ -139,6 +154,8 @@ def build_mcp_server(
     task_projection: object,
     deployment_policy: DeploymentDispatchPolicy,
     event_log_query: EventLogQuery,
+    model_catalog: ModelCatalog,
+    deployment_model_config: DeploymentModelConfig,
 ) -> FastMCP:
     """Build the FastMCP server bound to the supplied in-process dependencies.
 
@@ -168,6 +185,11 @@ def build_mcp_server(
     async def mad_create_session(
         payload: CreateSessionRequest, idempotency_key: str | None = None
     ) -> dict:
+        # 422 validation: if a model is specified, verify it exists in the catalog.
+        if payload.model is not None:
+            await ListProviderModelsUseCase(catalog=model_catalog).validate_model(
+                payload.agent.provider, payload.model
+            )
         resource_specs = [
             ResourceSpec(
                 type=r.type,
@@ -196,6 +218,7 @@ def build_mcp_server(
                 idempotency_key=idempotency_key,
                 base_branch=payload.base_branch,
                 working_directory=payload.working_directory,
+                model=payload.model,
             )
         )
         return output.session.response
@@ -211,6 +234,7 @@ def build_mcp_server(
             get_launcher=launcher_factory,
             emitter=event_emitter,
             task_queue=task_projection,
+            deployment_model_config=deployment_model_config,
         )
         use_case.execute(SendUserMessageInput(session_id=session_id, content=payload.content))
         return {"status": "accepted"}
@@ -323,12 +347,17 @@ def build_mcp_server(
         "task id and queued status. Mirrors POST /v1/sessions/{id}/tasks.",
     )
     async def mad_enqueue_task(session_id: str, payload: EnqueueTaskRequest) -> EnqueueTaskResponse:
-        use_case = EnqueueTaskUseCase(sessions_index=store.sessions, emitter=event_emitter)
+        use_case = EnqueueTaskUseCase(
+            sessions_index=store.sessions,
+            emitter=event_emitter,
+            model_catalog=model_catalog,
+        )
         output = await use_case.execute(
             EnqueueTaskInput(
                 session_id=session_id,
                 content=payload.content,
                 scheduled_for=payload.scheduled_for,
+                model=payload.model,
             )
         )
         return EnqueueTaskResponse(
@@ -353,6 +382,7 @@ def build_mcp_server(
                     content=t.content,
                     scheduled_for=t.scheduled_for,
                     created_at=t.created_at,
+                    model=t.model,
                 )
                 for t in output.queued
             ],
@@ -363,6 +393,7 @@ def build_mcp_server(
                     content=output.in_flight.content,
                     scheduled_for=output.in_flight.scheduled_for,
                     created_at=output.in_flight.created_at,
+                    model=output.in_flight.model,
                 )
                 if output.in_flight is not None
                 else None
@@ -461,6 +492,60 @@ def build_mcp_server(
         )
         output = await use_case.execute(SetDeploymentDispatchPolicyInput(policy=policy))
         return DeploymentDispatchPolicyResponse(policy=policy_to_dict(output.policy))
+
+    # -- Providers: model discovery (issue #55) --------------------------------
+
+    @mcp.tool(
+        name="mad_list_provider_models",
+        description="List all models available from each registered provider. Each "
+        "provider attempts dynamic discovery from its CLI and falls back to a static "
+        "list when unavailable. Mirrors GET /v1/providers/models.",
+    )
+    async def mad_list_provider_models() -> ProviderModelsResponse:
+        use_case = ListProviderModelsUseCase(catalog=model_catalog)
+        output = await use_case.execute()
+        return ProviderModelsResponse(providers=output.catalog)
+
+    # -- Deployment model config (issue #55) -----------------------------------
+
+    @mcp.tool(
+        name="mad_get_deployment_model",
+        description="Read the deployment-wide default model. Returns ``null`` when "
+        "no default has been set (provider uses its own default). "
+        "Mirrors GET /v1/model.",
+    )
+    def mad_get_deployment_model() -> DeploymentModelResponse:
+        use_case = GetDeploymentModelUseCase(config=deployment_model_config)
+        output: DeploymentModelOutput = use_case.execute()
+        return DeploymentModelResponse(model=output.model)
+
+    @mcp.tool(
+        name="mad_set_deployment_model",
+        description="Set the deployment-wide default model; every session that has "
+        "no per-session override honours it live on the next dispatch. "
+        "Mirrors PUT /v1/model.",
+    )
+    async def mad_set_deployment_model(
+        payload: SetDeploymentModelRequest,
+    ) -> DeploymentModelResponse:
+        use_case = SetDeploymentModelUseCase(config=deployment_model_config, emitter=event_emitter)
+        output: DeploymentModelOutput = await use_case.execute(
+            SetDeploymentModelInput(model=payload.model)
+        )
+        return DeploymentModelResponse(model=output.model)
+
+    @mcp.tool(
+        name="mad_clear_deployment_model",
+        description="Clear the deployment-wide model default so sessions use the "
+        "provider's own machine-configured default. Idempotent. "
+        "Mirrors DELETE /v1/model.",
+    )
+    async def mad_clear_deployment_model() -> DeploymentModelResponse:
+        use_case = ClearDeploymentModelUseCase(
+            config=deployment_model_config, emitter=event_emitter
+        )
+        output: DeploymentModelOutput = await use_case.execute()
+        return DeploymentModelResponse(model=output.model)
 
     # -- Events: historical query (issue #32) ---------------------------------
 
