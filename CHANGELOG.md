@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v0.5.10 (2026-06-14)
+
+### Features
+
+- **agents**: Add opencode launcher provider
+  ([`9d70222`](https://github.com/jlsaco/mad/commit/9d70222d35d3892d1e2e679e14a93a171662e255))
+- **http**: Discover provider models + per-level model selection
+  ([`3c254dc`](https://github.com/jlsaco/mad/commit/3c254dc8e519bdb3a497914a8909960b02006d93))
+- **http**: Mirror model discovery + selection as MCP tools
+  ([`f51f341`](https://github.com/jlsaco/mad/commit/f51f341cacae1a6cad6695040afd7ea51a7ca3e1))
+
+
 ## v0.5.9 (2026-06-14)
 
 ### Bug Fixes
