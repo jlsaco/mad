@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.5.9 (2026-06-14)
+
+### Bug Fixes
+
+- **http**: Drop a deleted session's queued tasks from the queue
+  ([`0d4513f`](https://github.com/jlsaco/mad/commit/0d4513f51c95ddac622178097a92cdb949d5d40b))
+- **http**: Resolve effective dispatch policy in the global queue view
+  ([`1a18f4a`](https://github.com/jlsaco/mad/commit/1a18f4a35c8d8380ef76fecb360e8207d3ff746d))
+
+### Features
+
+- **http**: Expose session priority and global queue as MCP tools
+  ([`edaf49d`](https://github.com/jlsaco/mad/commit/edaf49d8ba6872a9e3e40f1c615039fe81fe7c9f))
+
+
 ## v0.5.8 (2026-06-12)
 
 ### Features
@@ -17,6 +32,11 @@
 
 - **cli**: Ship mad.core.sessions in the published package
   ([`8cfb12f`](https://github.com/jlsaco/mad/commit/8cfb12f281efc08464349af4479759c890cb782b))
+
+### Features
+
+- **http**: Per-session priority and global GET /v1/queue view
+  ([`8d30ab0`](https://github.com/jlsaco/mad/commit/8d30ab0e1c44faea410bfa0feaa49bbda339b69c))
 
 
 ## v0.5.6 (2026-05-19)
