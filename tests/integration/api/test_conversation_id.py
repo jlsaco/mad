@@ -117,8 +117,6 @@ def test_list_tasks_exposes_conversation_mode(
     drain them immediately) and the lifespan context so the projection is
     bootstrapped and subscribed to the bus.
     """
-    from support.launchers import ScriptedLauncher
-
     app = create_app(launcher_factory=lambda name: fake_launcher)
     with TestClient(app) as client:
         session_id = _session_id(client, session_payload)
