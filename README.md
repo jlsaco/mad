@@ -19,6 +19,7 @@ Early days — `0.x`. Single launcher provider (`claude_cli`); HTTP + SSE surfac
 - The `claude` CLI installed and on `PATH` (override the binary with `MAD_CLAUDE_CLI_BIN`; per-run timeout via `MAD_CLAUDE_CLI_TIMEOUT_S`)
 - Optionally: the `opencode` CLI for the `opencode` provider (override the binary with `MAD_OPENCODE_BIN`; per-run timeout via `MAD_OPENCODE_TIMEOUT_S`, default 600 s)
 - A GitHub token with `repo` scope for cloning private repos (passed per-request, never persisted — see hard rule 2)
+- Session workspaces are created under `~/mad` by default. Override the base directory with `MAD_WORKSPACE_DIR` (used verbatim — no `~`/`$VAR` expansion) when you need a larger or persistent disk; resolution is `MAD_WORKSPACE_DIR` → `~/mad` → the system temp dir (last resort, only if the home directory cannot be resolved). The base is created on first use.
 
 ## Install
 

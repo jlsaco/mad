@@ -1,5 +1,6 @@
 """Integration tests for LocalWorkspaceProvisioner.materialize_github_repo
-covering the issue #8 base_branch checkout behavior.
+covering the issue #8 base_branch checkout behavior, plus the issue #64
+configurable workspace base directory (create/destroy filesystem effects).
 """
 
 from __future__ import annotations
@@ -12,6 +13,42 @@ import pytest
 from mad.adapters.outbound.persistence.local_workspace_provisioner import (
     LocalWorkspaceProvisioner,
 )
+
+
+def test_create_makes_missing_base_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #64: the resolved base is created on first use even when several levels
+    # of it are absent (mkdir parents=True), so an operator can point
+    # MAD_WORKSPACE_DIR at a path that does not exist yet.
+    base = tmp_path / "nested" / "workspaces"
+    monkeypatch.setenv("MAD_WORKSPACE_DIR", str(base))
+    assert not base.exists()
+
+    created = LocalWorkspaceProvisioner().create("sesn_xyz")
+
+    assert created == base / "mad_sesn_xyz"
+    assert created.is_dir()
+    assert base.is_dir()
+
+
+def test_destroy_removes_only_the_session_subdirectory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #64: destroy() tears down a single session's mad_<id> subdir and MUST
+    # leave both the shared base and any sibling session untouched — otherwise
+    # one session's teardown would wipe out concurrent sessions' workspaces.
+    base = tmp_path / "workspaces"
+    monkeypatch.setenv("MAD_WORKSPACE_DIR", str(base))
+    provisioner = LocalWorkspaceProvisioner()
+    target = provisioner.create("sesn_target")
+    sibling = provisioner.create("sesn_sibling")
+
+    provisioner.destroy("sesn_target")
+
+    assert not target.exists()
+    assert sibling.is_dir()
+    assert base.is_dir()
 
 
 def _bare_repo_with_branches(tmp_path: Path, branches: list[str]) -> Path:
