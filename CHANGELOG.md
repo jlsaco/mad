@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.5.12 (2026-06-21)
+
+### Bug Fixes
+
+- **agents**: Correct misleading comment in claude_cli stdout parser
+  ([`96ef51a`](https://github.com/jlsaco/mad/commit/96ef51a8765f97f3ddd37f320b540f24e6db3205))
+- **http**: Capture conversation ID from SessionStart hook in on_emit
+  ([`2022288`](https://github.com/jlsaco/mad/commit/2022288d221783f1d26ce3fa848f842314fd735a))
+
+### Features
+
+- **agents**: Capture conversation ID from claude_cli and opencode
+  ([`8c1b5de`](https://github.com/jlsaco/mad/commit/8c1b5de878589fe8646ddac1e10e07b1827f6fcf))
+- **http**: Expose conversation_mode on tasks and last_conversation_id on sessions
+  ([`643ac42`](https://github.com/jlsaco/mad/commit/643ac42a5184db6bdfaebab897f030e5b2058421))
+
+
 ## v0.5.11 (2026-06-21)
 
 ### Features
