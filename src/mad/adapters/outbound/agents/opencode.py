@@ -10,6 +10,23 @@ from typing import Any
 
 from mad.adapters.outbound.agents._subprocess import _scrub, _subprocess_env
 from mad.adapters.outbound.agents.hook_socket import resolve_hook_socket_path
+from mad.core.orchestration.domain.exceptions.rate_limit import RateLimitError
+
+# OpenCode does not expose structured retry events; fall back to stderr
+# pattern matching to detect rate-limit exits.
+_RATE_LIMIT_STDERR_PATTERNS = (
+    "rate_limit",
+    "rate limit",
+    "429",
+    "overloaded",
+    "529",
+    "session limit",
+    "resets ",
+    "billing",
+    "temporarily limiting",
+    "at capacity",
+    "too many requests",
+)
 
 
 class OpenCodeProvider:
@@ -98,18 +115,27 @@ class OpenCodeProvider:
                 "session.status_idle",
                 {"type": "session.status_idle", "stop_reason": "end_turn"},
             )
-        else:
-            stderr_raw = b""
-            if proc.stderr:
-                stderr_raw = await proc.stderr.read()
-            stderr_text = stderr_raw.decode(errors="replace")
-            scrubbed = _scrub(stderr_text[-2000:])
-            await emit(
-                "session.error",
-                {
-                    "type": "session.error",
-                    "error": scrubbed,
-                    "exit_code": proc.returncode,
-                },
-            )
+            return captured_id
+
+        # Non-zero exit: check stderr for rate-limit patterns.
+        stderr_raw = b""
+        if proc.stderr:
+            stderr_raw = await proc.stderr.read()
+        stderr_text = stderr_raw.decode(errors="replace")
+        stderr_tail = stderr_text[-2000:]
+
+        lower = stderr_tail.lower()
+        if any(pat in lower for pat in _RATE_LIMIT_STDERR_PATTERNS):
+            # Do NOT emit session.error — dispatcher retries.
+            raise RateLimitError(captured_id=captured_id, reason="rate_limit")
+
+        scrubbed = _scrub(stderr_tail)
+        await emit(
+            "session.error",
+            {
+                "type": "session.error",
+                "error": scrubbed,
+                "exit_code": proc.returncode,
+            },
+        )
         return captured_id
