@@ -20,8 +20,29 @@ class MalformedSettingsLocalJson(ValueError):
     """
 
 
+def _workspace_base() -> Path:
+    """Resolve the base directory under which session workspaces are created.
+
+    Resolution order (most specific wins):
+
+    1. ``MAD_WORKSPACE_DIR`` — operator-configured path, used verbatim. The
+       value is NOT expanded (no ``~`` / ``$VAR`` substitution); an empty or
+       whitespace-only value is treated as unset.
+    2. ``~/mad`` — XDG-friendly default on persistent storage.
+    3. ``tempfile.gettempdir()`` — last resort, reached only when the home
+       directory cannot be resolved (``Path.home()`` raises ``RuntimeError``).
+    """
+    configured = os.environ.get("MAD_WORKSPACE_DIR")
+    if configured and configured.strip():
+        return Path(configured)
+    try:
+        return Path.home() / "mad"
+    except RuntimeError:
+        return Path(tempfile.gettempdir())
+
+
 def workspace_path(session_id: str) -> Path:
-    return Path(tempfile.gettempdir()) / f"mad_{session_id}"
+    return _workspace_base() / f"mad_{session_id}"
 
 
 def _resolve_mount(workspace: Path, mount_path: str) -> Path:
