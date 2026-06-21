@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.5.15 (2026-06-21)
+
+### Bug Fixes
+
+- **agents**: Detect real claude-cli 429 rate-limit terminal stdout shape
+  ([`bec17ed`](https://github.com/jlsaco/mad/commit/bec17ed4c7cec2276d725e0f65b3d49d11da07da))
+
+
 ## v0.5.14 (2026-06-21)
 
 ### Bug Fixes
