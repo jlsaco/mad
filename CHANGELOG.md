@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.5.14 (2026-06-21)
+
+### Bug Fixes
+
+- **agents**: Prevent LimitOverrunError killing tasks on long stdout lines
+  ([`4deb5df`](https://github.com/jlsaco/mad/commit/4deb5df3e526eb2b6991bd40267c876607bf75b2))
+
+
 ## v0.5.13 (2026-06-21)
 
 ### Bug Fixes
