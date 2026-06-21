@@ -51,6 +51,7 @@ from mad.core.orchestration.domain.dispatch_policy import (
     policy_to_dict,
 )
 from mad.core.orchestration.domain.ordering import MAX_PRIORITY, MIN_PRIORITY
+from mad.core.orchestration.ports.task_queue import RetryInfo
 from mad.core.orchestration.use_cases.cancel_task import (
     CancelTaskInput,
     CancelTaskUseCase,
@@ -129,6 +130,14 @@ class EnqueueTaskResponse(BaseModel):
     status: str = "queued"
 
 
+class RetryInfoResponse(BaseModel):
+    attempt: int = Field(..., description="Retry attempt count (1-based).")
+    retry_after_s: float = Field(..., description="Backoff sleep duration in seconds.")
+    reason: str = Field(
+        ..., description="Rate-limit reason string from the CLI (e.g. 'rate_limit', 'overloaded')."
+    )
+
+
 class TaskResponse(BaseModel):
     task_id: UUID
     session_id: str
@@ -137,6 +146,18 @@ class TaskResponse(BaseModel):
     created_at: datetime
     model: str | None = None
     conversation_mode: Literal["new", "resume"] = "new"
+    status: Literal["dispatched", "retrying"] = Field(
+        default="dispatched",
+        description=(
+            "``dispatched`` — the task is running normally. "
+            "``retrying`` — the task hit a rate limit and is sleeping "
+            "before the next attempt; see ``retry_info`` for details."
+        ),
+    )
+    retry_info: RetryInfoResponse | None = Field(
+        default=None,
+        description="Present only when ``status == 'retrying'``.",
+    )
 
 
 class ListTasksResponse(BaseModel):
@@ -339,16 +360,28 @@ async def enqueue_task(
     )
 
 
+def _retry_info_response(ri: RetryInfo | None) -> RetryInfoResponse | None:
+    if ri is None:
+        return None
+    return RetryInfoResponse(
+        attempt=ri.attempt,
+        retry_after_s=ri.retry_after_s,
+        reason=ri.reason,
+    )
+
+
 @router.get(
     "/v1/sessions/{session_id}/tasks",
     response_model=ListTasksResponse,
 )
 async def list_tasks(session_id: str, request: Request) -> ListTasksResponse:
+    proj = _projection(request)
     use_case = ListTasksUseCase(
         sessions_index=_store(request).sessions,
-        task_queue=_projection(request),
+        task_queue=proj,
     )
     output = use_case.execute(session_id)
+    ri = _retry_info_response(proj.retry_info(session_id))
     return ListTasksResponse(
         queued=[
             TaskResponse(
@@ -371,6 +404,8 @@ async def list_tasks(session_id: str, request: Request) -> ListTasksResponse:
                 created_at=output.in_flight.created_at,
                 model=output.in_flight.model,
                 conversation_mode=output.in_flight.conversation_mode,
+                status="retrying" if ri is not None else "dispatched",
+                retry_info=ri,
             )
             if output.in_flight is not None
             else None

@@ -54,11 +54,13 @@ from mad.core.orchestration.domain.dispatch_policy import (
     can_dispatch,
     next_window_opening,
 )
+from mad.core.orchestration.domain.exceptions.rate_limit import RateLimitError
 from mad.core.orchestration.domain.model_config import (
     DeploymentModelConfig,
     resolve_effective_model,
 )
 from mad.core.orchestration.domain.ordering import order_ready_candidates
+from mad.core.orchestration.domain.retry_schedule import backoff_s, exceeds_ceiling
 from mad.core.orchestration.domain.task import Task
 from mad.core.orchestration.ports.clock import Clock
 from mad.core.orchestration.ports.task_projection import TaskProjection
@@ -101,6 +103,7 @@ class Dispatcher:
         self._launch_task: asyncio.Task[None] | None = None
         self._tick_task: asyncio.Task[None] | None = None
         self._in_flight: tuple[str, UUID] | None = None
+        self._stopping = False
         self._subscription: AsyncIterator[Event] | None = None
         # Track tasks that the bus loop has already accounted for via
         # task.queued_for_window so the periodic tick doesn't re-emit
@@ -129,6 +132,7 @@ class Dispatcher:
 
     async def stop(self) -> None:
         """Cancel the dispatch loop, the tick loop, and the in-flight launcher task."""
+        self._stopping = True
         for task in (self._launch_task, self._loop_task, self._tick_task):
             if task is None:
                 continue
@@ -214,6 +218,8 @@ class Dispatcher:
 
     async def _maybe_dispatch_next(self) -> None:
         """Single-dispatch invariant — start at most one task across all sessions."""
+        if self._stopping:
+            return
         if self._in_flight is not None:
             return
         next_task = self._find_next_dispatchable()
@@ -278,39 +284,101 @@ class Dispatcher:
         return opening.isoformat() if opening is not None else None
 
     async def _run_task(self, task: Task) -> None:
-        """Drive the launcher for one task, then emit task.completed/failed."""
+        """Drive the launcher for one task, then emit task.completed/failed.
+
+        Rate-limit failures are retried with exponential backoff (issue #62):
+        the in-flight slot stays set during backoff so the dispatcher does not
+        start other tasks while waiting for the API to recover.  ``task.retrying``
+        is emitted before each sleep so the status is observable.  After the
+        5-hour cumulative ceiling, the task is failed with
+        ``reason="rate_limit_exhausted"``.
+
+        All other failures are terminal: ``task.failed`` is emitted immediately.
+        """
+        session = self._sessions[task.session_id]
+        effective_model = resolve_effective_model(
+            task_model=task.model,
+            session_model=session.model,
+            deployment_default=(
+                self._deployment_model_config.default_model
+                if self._deployment_model_config is not None
+                else None
+            ),
+        )
+
+        attempt = 0
+        cumulative_wait_s = 0.0
+        # conversation_mode for the first run uses the task setting.
+        # After the first rate-limit, we always resume from the captured ID.
+        current_conversation_mode = task.conversation_mode
+
         try:
-            session = self._sessions[task.session_id]
-            effective_model = resolve_effective_model(
-                task_model=task.model,
-                session_model=session.model,
-                deployment_default=(
-                    self._deployment_model_config.default_model
-                    if self._deployment_model_config is not None
-                    else None
-                ),
-            )
-            await _run_launcher(
-                session=session,
-                session_id=task.session_id,
-                prompt=task.content,
-                get_launcher=self._get_launcher,
-                emitter=self._emitter,
-                propagate_failures=True,
-                model=effective_model,
-                conversation_mode=task.conversation_mode,
-            )
+            while True:
+                try:
+                    await _run_launcher(
+                        session=session,
+                        session_id=task.session_id,
+                        prompt=task.content,
+                        get_launcher=self._get_launcher,
+                        emitter=self._emitter,
+                        propagate_failures=True,
+                        model=effective_model,
+                        conversation_mode=current_conversation_mode,
+                    )
+                except RateLimitError as rl_exc:
+                    # Capture conversation ID from the failed run so the next
+                    # attempt can resume the conversation instead of starting
+                    # fresh.  _run_launcher already sets session.last_conversation_id
+                    # from stdout; the exc.captured_id is the most recent value,
+                    # which may be newer (from the api_retry event).
+                    if rl_exc.captured_id is not None:
+                        session.last_conversation_id = rl_exc.captured_id
+
+                    delay = backoff_s(attempt)
+                    cumulative_wait_s += delay
+
+                    if exceeds_ceiling(cumulative_wait_s):
+                        await self._emitter.emit(
+                            task.session_id,
+                            "task.failed",
+                            {
+                                "task_id": str(task.task_id),
+                                "reason": "rate_limit_exhausted",
+                            },
+                        )
+                        return
+
+                    attempt += 1
+                    await self._emitter.emit(
+                        task.session_id,
+                        "task.retrying",
+                        {
+                            "task_id": str(task.task_id),
+                            "attempt": attempt,
+                            "retry_after_s": delay,
+                            "reason": rl_exc.reason,
+                        },
+                    )
+                    # _in_flight remains set — no other tasks are dispatched
+                    # during the backoff sleep.
+                    await asyncio.sleep(delay)
+                    # Subsequent attempts always resume the conversation.
+                    current_conversation_mode = "resume"
+                    continue
+
+                # Success — primary run (and auto-sync) completed.
+                await self._emitter.emit(
+                    task.session_id,
+                    "task.completed",
+                    {"task_id": str(task.task_id)},
+                )
+                return
+
         except Exception as exc:
             await self._emitter.emit(
                 task.session_id,
                 "task.failed",
                 {"task_id": str(task.task_id), "reason": str(exc)},
-            )
-        else:
-            await self._emitter.emit(
-                task.session_id,
-                "task.completed",
-                {"task_id": str(task.task_id)},
             )
         finally:
             self._in_flight = None

@@ -47,6 +47,7 @@ from mad.adapters.inbound.http.routes.orchestration import (
     TriggerManualDispatchResponse,
     UpdatePriorityRequest,
     _queue_task_entry,
+    _retry_info_response,
     _scheduled_task_entry,
 )
 from mad.adapters.inbound.http.routes.providers import (
@@ -392,6 +393,7 @@ def build_mcp_server(
     def mad_list_tasks(session_id: str) -> ListTasksResponse:
         use_case = ListTasksUseCase(sessions_index=store.sessions, task_queue=task_projection)
         output = use_case.execute(session_id)
+        ri = _retry_info_response(task_projection.retry_info(session_id))
         return ListTasksResponse(
             queued=[
                 TaskResponse(
@@ -414,6 +416,8 @@ def build_mcp_server(
                     created_at=output.in_flight.created_at,
                     model=output.in_flight.model,
                     conversation_mode=output.in_flight.conversation_mode,
+                    status="retrying" if ri is not None else "dispatched",
+                    retry_info=ri,
                 )
                 if output.in_flight is not None
                 else None
