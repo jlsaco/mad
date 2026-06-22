@@ -279,6 +279,9 @@ async def test_tool_surface_is_the_full_request_response_route_set(client: TestC
             "mad_get_deployment_model",
             "mad_set_deployment_model",
             "mad_clear_deployment_model",
+            "mad_get_deployment_effort",
+            "mad_set_deployment_effort",
+            "mad_clear_deployment_effort",
         ]
     )
 

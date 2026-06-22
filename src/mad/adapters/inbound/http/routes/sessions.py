@@ -85,6 +85,16 @@ class CreateSessionRequest(BaseModel):
             "``null`` (default) inherits from the deployment model default."
         ),
     )
+    effort: str | None = Field(
+        default=None,
+        description=(
+            "Optional reasoning-effort level; overrides the deployment default for "
+            "this session. Forwarded verbatim to the provider CLI (``--effort`` for "
+            "claude, ``--variant`` for opencode) — an opaque pass-through string, not "
+            "validated by Mad. ``null`` (default) inherits from the deployment effort "
+            "default."
+        ),
+    )
 
 
 class SendMessageRequest(BaseModel):
@@ -207,6 +217,7 @@ async def create_session(
             base_branch=payload.base_branch,
             working_directory=payload.working_directory,
             model=payload.model,
+            effort=payload.effort,
         )
     )
 
@@ -223,6 +234,7 @@ async def send_message(session_id: str, payload: SendMessageRequest, request: Re
         emitter=request.app.state.event_emitter,
         task_queue=request.app.state.task_projection,
         deployment_model_config=getattr(request.app.state, "deployment_model_config", None),
+        deployment_effort_config=getattr(request.app.state, "deployment_effort_config", None),
     )
     use_case.execute(SendUserMessageInput(session_id=session_id, content=payload.content))
 

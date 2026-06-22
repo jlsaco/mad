@@ -50,8 +50,10 @@ from mad.adapters.inbound.http.routes.orchestration import (
     _scheduled_task_entry,
 )
 from mad.adapters.inbound.http.routes.providers import (
+    DeploymentEffortResponse,
     DeploymentModelResponse,
     ProviderModelsResponse,
+    SetDeploymentEffortRequest,
     SetDeploymentModelRequest,
 )
 from mad.adapters.inbound.http.routes.sessions import (
@@ -68,6 +70,7 @@ from mad.core.events.ports.event_log_query import EventLogQuery
 from mad.core.events.use_cases.query_events import QueryEventsInput, QueryEventsUseCase
 from mad.core.orchestration.domain.deployment_policy import DeploymentDispatchPolicy
 from mad.core.orchestration.domain.dispatch_policy import policy_from_dict, policy_to_dict
+from mad.core.orchestration.domain.effort_config import DeploymentEffortConfig
 from mad.core.orchestration.domain.model_config import DeploymentModelConfig
 from mad.core.orchestration.ports.clock import Clock
 from mad.core.orchestration.ports.model_catalog import ModelCatalog
@@ -80,6 +83,13 @@ from mad.core.orchestration.use_cases.deployment_dispatch_policy import (
     GetDeploymentDispatchPolicyUseCase,
     SetDeploymentDispatchPolicyInput,
     SetDeploymentDispatchPolicyUseCase,
+)
+from mad.core.orchestration.use_cases.deployment_effort_config import (
+    ClearDeploymentEffortUseCase,
+    DeploymentEffortOutput,
+    GetDeploymentEffortUseCase,
+    SetDeploymentEffortInput,
+    SetDeploymentEffortUseCase,
 )
 from mad.core.orchestration.use_cases.deployment_model_config import (
     ClearDeploymentModelUseCase,
@@ -168,6 +178,7 @@ def build_mcp_server(
     clock: Clock,
     model_catalog: ModelCatalog,
     deployment_model_config: DeploymentModelConfig,
+    deployment_effort_config: DeploymentEffortConfig,
 ) -> FastMCP:
     """Build the FastMCP server bound to the supplied in-process dependencies.
 
@@ -231,6 +242,7 @@ def build_mcp_server(
                 base_branch=payload.base_branch,
                 working_directory=payload.working_directory,
                 model=payload.model,
+                effort=payload.effort,
             )
         )
         return output.session.response
@@ -247,6 +259,7 @@ def build_mcp_server(
             emitter=event_emitter,
             task_queue=task_projection,
             deployment_model_config=deployment_model_config,
+            deployment_effort_config=deployment_effort_config,
         )
         use_case.execute(SendUserMessageInput(session_id=session_id, content=payload.content))
         return {"status": "accepted"}
@@ -601,6 +614,50 @@ def build_mcp_server(
         )
         output: DeploymentModelOutput = await use_case.execute()
         return DeploymentModelResponse(model=output.model)
+
+    # -- Deployment effort config (issue #60) ----------------------------------
+
+    @mcp.tool(
+        name="mad_get_deployment_effort",
+        description="Read the deployment-wide default reasoning effort. Returns "
+        "``null`` when no default has been set (provider uses its own default). "
+        "Mirrors GET /v1/effort.",
+    )
+    def mad_get_deployment_effort() -> DeploymentEffortResponse:
+        use_case = GetDeploymentEffortUseCase(config=deployment_effort_config)
+        output: DeploymentEffortOutput = use_case.execute()
+        return DeploymentEffortResponse(effort=output.effort)
+
+    @mcp.tool(
+        name="mad_set_deployment_effort",
+        description="Set the deployment-wide default reasoning effort; every session "
+        "that has no per-session override honours it live on the next dispatch. The "
+        "value is an opaque pass-through string (claude --effort, opencode --variant), "
+        "not validated by Mad. Mirrors PUT /v1/effort.",
+    )
+    async def mad_set_deployment_effort(
+        payload: SetDeploymentEffortRequest,
+    ) -> DeploymentEffortResponse:
+        use_case = SetDeploymentEffortUseCase(
+            config=deployment_effort_config, emitter=event_emitter
+        )
+        output: DeploymentEffortOutput = await use_case.execute(
+            SetDeploymentEffortInput(effort=payload.effort)
+        )
+        return DeploymentEffortResponse(effort=output.effort)
+
+    @mcp.tool(
+        name="mad_clear_deployment_effort",
+        description="Clear the deployment-wide reasoning-effort default so sessions "
+        "use the provider's own machine-configured default. Idempotent. "
+        "Mirrors DELETE /v1/effort.",
+    )
+    async def mad_clear_deployment_effort() -> DeploymentEffortResponse:
+        use_case = ClearDeploymentEffortUseCase(
+            config=deployment_effort_config, emitter=event_emitter
+        )
+        output: DeploymentEffortOutput = await use_case.execute()
+        return DeploymentEffortResponse(effort=output.effort)
 
     # -- Events: historical query (issue #32) ---------------------------------
 

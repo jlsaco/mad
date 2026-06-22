@@ -71,6 +71,7 @@ def main() -> None:
             deployment_policy,
             model_catalog,
             deployment_model_config,
+            deployment_effort_config,
         ) = build_dependencies()
 
         public_app = create_app(
@@ -85,6 +86,7 @@ def main() -> None:
             deployment_policy=deployment_policy,
             model_catalog=model_catalog,
             deployment_model_config=deployment_model_config,
+            deployment_effort_config=deployment_effort_config,
         )
         internal_app = create_internal_app(emitter)
 
