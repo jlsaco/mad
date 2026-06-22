@@ -117,6 +117,7 @@ class SessionDetailResponse(BaseModel):
     priority: int
     created_at: datetime
     updated_at: datetime
+    last_conversation_id: str | None = None
 
 
 class CleanupSessionsRequest(BaseModel):
@@ -259,6 +260,7 @@ async def get_session(session_id: str, request: Request) -> SessionDetailRespons
         priority=output.priority,
         created_at=output.created_at,
         updated_at=output.updated_at,
+        last_conversation_id=output.last_conversation_id,
     )
 
 

@@ -23,6 +23,7 @@ from mad.core.orchestration.domain.effort_config import (
     resolve_effective_effort,
 )
 from mad.core.orchestration.domain.exceptions.base import SessionHasInFlightTask
+from mad.core.orchestration.domain.exceptions.rate_limit import RateLimitError
 from mad.core.orchestration.domain.model_config import (
     DeploymentModelConfig,
     resolve_effective_model,
@@ -119,6 +120,7 @@ async def _run_launcher(
     propagate_failures: bool = False,
     model: str | None = None,
     effort: str | None = None,
+    conversation_mode: str = "new",
 ) -> None:
     """Internal coroutine: run the launcher and handle lifecycle events.
 
@@ -135,6 +137,12 @@ async def _run_launcher(
     ``effort`` is the resolved effective reasoning effort (issue #60),
     forwarded to the launcher as ``--effort`` (claude) / ``--variant``
     (opencode). ``None`` means omit the flag and use the provider's default.
+
+    ``conversation_mode`` controls whether to start a fresh conversation
+    (``"new"``, default) or continue a previous one (``"resume"``).
+    When resuming, ``session.last_conversation_id`` is passed to the
+    launcher.  If no ID is stored yet, falls back to ``"new"`` and emits
+    ``agent.conversation_resume_skipped``.
     """
     await emitter.emit(session_id, "session.status_running")
     session.mark_running()
@@ -143,6 +151,19 @@ async def _run_launcher(
 
     launcher = get_launcher(session.agent["provider"])
     workspace = Path(session.working_directory or session.workspace)
+
+    # Resolve resume ID before the run starts.
+    resume_id: str | None = None
+    if conversation_mode == "resume":
+        if session.last_conversation_id is not None:
+            resume_id = session.last_conversation_id
+        else:
+            await emitter.emit(
+                session_id,
+                "agent.conversation_resume_skipped",
+                {"reason": "no_conversation_id"},
+            )
+            # Fall back to a fresh conversation.
 
     async def emit(event_type: str, data: dict[str, Any] | None = None) -> None:
         redacted_data = (
@@ -158,19 +179,44 @@ async def _run_launcher(
 
     primary_failure: Exception | None = None
     try:
-        await launcher.run(
+        captured_id = await launcher.run(
             session_id=session_id,
             prompt=prompt,
             workspace=workspace,
             emit=emit,
             model=model,
             effort=effort,
+            conversation_id=resume_id,
         )
+        if captured_id is not None:
+            session.last_conversation_id = captured_id
+    except RateLimitError:
+        if propagate_failures:
+            # Let the dispatcher catch this and drive the retry loop.
+            # Do NOT emit session.error — this run is not terminal yet.
+            raise
+        # Fire-and-forget path (/messages): no dispatcher to retry, so
+        # treat rate-limit as a terminal session error.
+        if session.status == "running":
+            await emitter.emit(
+                session_id,
+                "session.error",
+                {"error": "rate limit reached; retry not available on /messages path"},
+            )
+            session.mark_error()
+        # primary_failure stays None so auto-sync still runs.
     except Exception as exc:
         if session.status == "running":
             await emitter.emit(session_id, "session.error", {"error": str(exc)})
             session.mark_error()
         primary_failure = exc
+
+    # Snapshot the primary run's conversation ID before the auto-sync run.
+    # The auto-sync run starts its own Claude subprocess which fires a
+    # SessionStart hook that, via on_emit, would overwrite
+    # session.last_conversation_id with the auto-sync's ID. Snapshotting
+    # here and restoring below preserves the primary conversation ID.
+    primary_conversation_id = session.last_conversation_id
 
     # Post-run auto-sync (issue #8): always launch a second agent run in
     # the same workspace with a fixed instruction prompt that decides
@@ -195,6 +241,10 @@ async def _run_launcher(
         )
         session.mark_error()
         auto_sync_failure = exc
+
+    # Restore the primary run's conversation ID — the auto-sync run's
+    # SessionStart hook may have overwritten it via on_emit.
+    session.last_conversation_id = primary_conversation_id
 
     if propagate_failures and primary_failure is not None:
         raise primary_failure

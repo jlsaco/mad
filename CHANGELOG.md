@@ -1,6 +1,54 @@
 # CHANGELOG
 
 
+## v0.5.15 (2026-06-21)
+
+### Bug Fixes
+
+- **agents**: Detect real claude-cli 429 rate-limit terminal stdout shape
+  ([`bec17ed`](https://github.com/jlsaco/mad/commit/bec17ed4c7cec2276d725e0f65b3d49d11da07da))
+
+
+## v0.5.14 (2026-06-21)
+
+### Bug Fixes
+
+- **agents**: Prevent LimitOverrunError killing tasks on long stdout lines
+  ([`4deb5df`](https://github.com/jlsaco/mad/commit/4deb5df3e526eb2b6991bd40267c876607bf75b2))
+
+
+## v0.5.13 (2026-06-21)
+
+### Bug Fixes
+
+- **agents**: Treat billing errors as terminal and require --verbose for stream-json
+  ([`d7f3496`](https://github.com/jlsaco/mad/commit/d7f34965fe172fa7d7c197b3e42bf9db05e5741b))
+
+### Features
+
+- **agents**: Detect rate-limit exits in claude_cli and opencode providers
+  ([`59f37a5`](https://github.com/jlsaco/mad/commit/59f37a5134696b28f35114922be7453612e948b0))
+- **http**: Expose retry status and retry_info on task list response
+  ([`24a0cdd`](https://github.com/jlsaco/mad/commit/24a0cdd5272b3656b94861871725ef7219d4c3f4))
+
+
+## v0.5.12 (2026-06-21)
+
+### Bug Fixes
+
+- **agents**: Correct misleading comment in claude_cli stdout parser
+  ([`96ef51a`](https://github.com/jlsaco/mad/commit/96ef51a8765f97f3ddd37f320b540f24e6db3205))
+- **http**: Capture conversation ID from SessionStart hook in on_emit
+  ([`2022288`](https://github.com/jlsaco/mad/commit/2022288d221783f1d26ce3fa848f842314fd735a))
+
+### Features
+
+- **agents**: Capture conversation ID from claude_cli and opencode
+  ([`8c1b5de`](https://github.com/jlsaco/mad/commit/8c1b5de878589fe8646ddac1e10e07b1827f6fcf))
+- **http**: Expose conversation_mode on tasks and last_conversation_id on sessions
+  ([`643ac42`](https://github.com/jlsaco/mad/commit/643ac42a5184db6bdfaebab897f030e5b2058421))
+
+
 ## v0.5.11 (2026-06-21)
 
 ### Features

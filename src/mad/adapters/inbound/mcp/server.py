@@ -47,6 +47,7 @@ from mad.adapters.inbound.http.routes.orchestration import (
     TriggerManualDispatchResponse,
     UpdatePriorityRequest,
     _queue_task_entry,
+    _retry_info_response,
     _scheduled_task_entry,
 )
 from mad.adapters.inbound.http.routes.providers import (
@@ -324,6 +325,7 @@ def build_mcp_server(
             priority=output.priority,
             created_at=output.created_at,
             updated_at=output.updated_at,
+            last_conversation_id=output.last_conversation_id,
         )
 
     @mcp.tool(
@@ -387,6 +389,7 @@ def build_mcp_server(
                 content=payload.content,
                 scheduled_for=payload.scheduled_for,
                 model=payload.model,
+                conversation_mode=payload.conversation_mode,
             )
         )
         return EnqueueTaskResponse(
@@ -403,6 +406,7 @@ def build_mcp_server(
     def mad_list_tasks(session_id: str) -> ListTasksResponse:
         use_case = ListTasksUseCase(sessions_index=store.sessions, task_queue=task_projection)
         output = use_case.execute(session_id)
+        ri = _retry_info_response(task_projection.retry_info(session_id))
         return ListTasksResponse(
             queued=[
                 TaskResponse(
@@ -412,6 +416,7 @@ def build_mcp_server(
                     scheduled_for=t.scheduled_for,
                     created_at=t.created_at,
                     model=t.model,
+                    conversation_mode=t.conversation_mode,
                 )
                 for t in output.queued
             ],
@@ -423,6 +428,9 @@ def build_mcp_server(
                     scheduled_for=output.in_flight.scheduled_for,
                     created_at=output.in_flight.created_at,
                     model=output.in_flight.model,
+                    conversation_mode=output.in_flight.conversation_mode,
+                    status="retrying" if ri is not None else "dispatched",
+                    retry_info=ri,
                 )
                 if output.in_flight is not None
                 else None

@@ -30,7 +30,8 @@ class AgentLauncher(Protocol):
         emit: Callable[[str, dict[str, Any] | None], Coroutine[Any, Any, None]],
         model: str | None = None,
         effort: str | None = None,
-    ) -> None:
+        conversation_id: str | None = None,
+    ) -> str | None:
         """Launch the external agent and stream events via ``emit``.
 
         ``model`` is an optional model identifier forwarded to the underlying
@@ -41,5 +42,12 @@ class AgentLauncher(Protocol):
         underlying CLI (``--effort`` for claude, ``--variant`` for opencode,
         issue #60). ``None`` means omit the flag and use the provider's default.
         Effort is an opaque pass-through string — Mad does not validate it.
+
+        ``conversation_id`` is the provider conversation/session id to resume
+        (e.g. ``--resume <id>`` for Claude, ``--session <id>`` for OpenCode).
+        When ``None``, a fresh conversation is started.
+
+        Returns the conversation id captured from the agent's output, or
+        ``None`` when the provider did not expose one.
         """
         ...

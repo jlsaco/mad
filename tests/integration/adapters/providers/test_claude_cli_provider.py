@@ -6,6 +6,7 @@ AC → test mapping:
   AC-3  exit 1 + token in stderr → session.error/redacted  → test_claude_cli_ac3_*
   AC-4  timeout → session.error < 2s, no zombie            → test_claude_cli_ac4_*
   AC-5  MAD_CLAUDE_CLI_BIN custom path is invoked           → test_claude_cli_ac5_*
+  AC-10 provider-level rate-limit detection                 → test_claude_cli_rate_limit_*
 
 These tests are EXPECTED to fail (red) until ClaudeCLIProvider is implemented.
 Tests use fake binary scripts in tmp_path — no real `claude` binary is invoked.
@@ -21,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from mad.adapters.outbound.agents.claude_cli import ClaudeCLIProvider
+from mad.core.orchestration.domain.exceptions.rate_limit import RateLimitError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -295,6 +297,351 @@ async def test_claude_cli_ac6_model_flag_absent_when_model_is_none(
 
     argv_text = marker.read_text()
     assert "--model" not in argv_text, f"Expected --model absent from argv, got: {argv_text}"
+
+
+# ---------------------------------------------------------------------------
+# AC-10: provider-level rate-limit detection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_rate_limit_api_retry_raises_rate_limit_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """system/api_retry with error=rate_limit on stdout raises RateLimitError, no session.error."""
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        """\
+        import sys, json
+        print(json.dumps({"type": "system", "subtype": "api_retry", "error": "rate_limit", "session_id": "conv-abc", "error_status": 429}))
+        sys.exit(1)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    captured_events: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        captured_events.append(event)
+
+    with pytest.raises(RateLimitError) as excinfo:
+        await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    assert excinfo.value.reason == "rate_limit", (
+        f"Expected reason='rate_limit', got: {excinfo.value.reason!r}"
+    )
+    assert excinfo.value.captured_id == "conv-abc", (
+        f"Expected captured_id='conv-abc', got: {excinfo.value.captured_id!r}"
+    )
+    error_events = [e for e in captured_events if e.get("type") == "session.error"]
+    assert len(error_events) == 0, (
+        f"session.error must NOT be emitted when RateLimitError is raised, got: {error_events}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_rate_limit_overloaded_api_retry_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """system/api_retry with error=overloaded raises RateLimitError with reason='overloaded'."""
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        """\
+        import sys, json
+        print(json.dumps({"type": "system", "subtype": "api_retry", "error": "overloaded", "session_id": "conv-xyz", "error_status": 529}))
+        sys.exit(1)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    captured_events: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        captured_events.append(event)
+
+    with pytest.raises(RateLimitError) as excinfo:
+        await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    assert excinfo.value.reason == "overloaded", (
+        f"Expected reason='overloaded', got: {excinfo.value.reason!r}"
+    )
+    error_events = [e for e in captured_events if e.get("type") == "session.error"]
+    assert len(error_events) == 0, (
+        f"session.error must NOT be emitted for overloaded rate-limit, got: {error_events}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_rate_limit_stderr_fallback_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stderr with a rate-limit pattern and no api_retry event raises RateLimitError."""
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        """\
+        import sys
+        print("API Error: Repeated 529 Overloaded errors. The API is at capacity.", file=sys.stderr)
+        sys.exit(1)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    captured_events: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        captured_events.append(event)
+
+    with pytest.raises(RateLimitError) as excinfo:
+        await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    error_events = [e for e in captured_events if e.get("type") == "session.error"]
+    assert len(error_events) == 0, (
+        f"session.error must NOT be emitted when stderr triggers RateLimitError, got: {error_events}"
+    )
+    assert excinfo.value.reason == "rate_limit"
+    assert excinfo.value.captured_id is None
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_billing_error_emits_session_error_not_rate_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative twin: billing stderr is terminal — session.error emitted, NOT RateLimitError."""
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        """\
+        import sys
+        print("API Error: billing_error - payment required", file=sys.stderr)
+        sys.exit(1)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    captured_events: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        captured_events.append(event)
+
+    # Must NOT raise RateLimitError — billing is non-retriable.
+    await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    error_events = [e for e in captured_events if e.get("type") == "session.error"]
+    assert len(error_events) >= 1, (
+        f"Expected session.error for billing error (non-retriable), got: {captured_events}"
+    )
+    assert error_events[-1].get("exit_code") == 1, (
+        f"session.error must carry exit_code=1, got: {error_events[-1]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# AC-10 (follow-up): terminal-stdout rate-limit shape with CLAUDE_CODE_MAX_RETRIES=0.
+#
+# With internal retries disabled the CLI never emits system/api_retry. A real
+# usage/session limit instead arrives as: a rate_limit_event (status="rejected"
+# carrying resetsAt), an assistant message with error="rate_limit", and a
+# terminal result (is_error=true, api_error_status=429) — all on STDOUT, with
+# stderr empty and exit 1. The pre-fix detector keyed only on api_retry / stderr
+# and silently drained the task. See issue #62 root-cause comment.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_rate_limit_terminal_stdout_result_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The terminal-stdout 429 shape (rate_limit_event + assistant + result,
+    empty stderr, exit 1) must raise RateLimitError, capture the conversation
+    ID, carry a retry floor from resetsAt, and emit NO session.error."""
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        """\
+        import sys, json, time
+        print(json.dumps({"type": "system", "subtype": "init", "session_id": "conv-incident"}))
+        resets = int(time.time()) + 3600
+        print(json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "status": "rejected", "resetsAt": resets, "rateLimitType": "five_hour",
+            "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled"}}))
+        print(json.dumps({"type": "assistant", "message": {"model": "<synthetic>"}, "error": "rate_limit"}))
+        print(json.dumps({"type": "result", "subtype": "success", "is_error": True,
+            "api_error_status": 429, "result": "You've hit your session limit"}))
+        sys.exit(1)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    captured_events: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        captured_events.append(event)
+
+    with pytest.raises(RateLimitError) as excinfo:
+        await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    assert excinfo.value.reason == "rate_limit", (
+        f"Expected reason='rate_limit', got: {excinfo.value.reason!r}"
+    )
+    assert excinfo.value.captured_id == "conv-incident", (
+        f"Expected captured_id from system/init, got: {excinfo.value.captured_id!r}"
+    )
+    # resetsAt was now+3600; the launcher converts it to a remaining-seconds
+    # floor at raise time, so it lands just under an hour.
+    assert excinfo.value.retry_after_floor_s == pytest.approx(3600, abs=120), (
+        f"Expected ~3600 s retry floor from resetsAt, got: {excinfo.value.retry_after_floor_s!r}"
+    )
+    error_events = [e for e in captured_events if e.get("type") == "session.error"]
+    assert len(error_events) == 0, (
+        f"session.error must NOT be emitted for a terminal-stdout 429, got: {error_events}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_terminal_result_non_429_emits_session_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative twin: a terminal result with is_error but a non-retriable status
+    (500) is a real failure — session.error emitted, NOT RateLimitError."""
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        """\
+        import sys, json
+        print(json.dumps({"type": "result", "subtype": "success", "is_error": True,
+            "api_error_status": 500, "result": "internal server error"}))
+        sys.exit(1)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    captured_events: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        captured_events.append(event)
+
+    # Must NOT raise — a 500 is terminal, not a rate limit.
+    await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    error_events = [e for e in captured_events if e.get("type") == "session.error"]
+    assert len(error_events) >= 1, (
+        f"Expected session.error for a non-429 terminal result, got: {captured_events}"
+    )
+    assert error_events[-1].get("exit_code") == 1, (
+        f"session.error must carry exit_code=1, got: {error_events[-1]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_rate_limit_without_resets_at_has_no_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative twin for the retry floor: a 429 result with NO rate_limit_event
+    (so no resetsAt) still raises RateLimitError, but retry_after_floor_s is
+    None — the dispatcher falls back to the plain backoff schedule."""
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        """\
+        import sys, json
+        print(json.dumps({"type": "result", "is_error": True, "api_error_status": 429}))
+        sys.exit(1)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    captured_events: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        captured_events.append(event)
+
+    with pytest.raises(RateLimitError) as excinfo:
+        await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    assert excinfo.value.retry_after_floor_s is None, (
+        f"Expected no retry floor without resetsAt, got: {excinfo.value.retry_after_floor_s!r}"
+    )
+    error_events = [e for e in captured_events if e.get("type") == "session.error"]
+    assert len(error_events) == 0, (
+        f"session.error must NOT be emitted for a 429 result, got: {error_events}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_sets_max_retries_env_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CODE_MAX_RETRIES must be set to '0' in the subprocess environment (AC#2)."""
+    marker = tmp_path / "max_retries.txt"
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        f"""\
+        import os, sys
+        open("{marker}", "w").write(os.environ.get("CLAUDE_CODE_MAX_RETRIES", "<unset>"))
+        sys.exit(0)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    collected: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        collected.append(event)
+
+    await launcher.run(session_id="s1", prompt="x", workspace=tmp_path, emit=capture)
+
+    value = marker.read_text()
+    assert value == "0", f"CLAUDE_CODE_MAX_RETRIES must be '0' in subprocess env, got: {value!r}"
+
+
+# ---------------------------------------------------------------------------
+# Issue #70: a single stdout line larger than asyncio's 64 KB default buffer
+# must not raise LimitOverrunError and kill the task.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_long_stdout_line_emitted_without_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 200 KB single stdout line (far past asyncio's 64 KB default) must be
+    emitted intact as agent.output and finish with session.status_idle — not
+    die with LimitOverrunError (issue #70)."""
+    line_len = 200_000  # > 64 KB asyncio default that used to overflow the buffer
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        f"""\
+        import sys
+        print("z" * {line_len})
+        sys.exit(0)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    events = await _collect_emit(launcher, prompt="test", workspace=tmp_path)
+
+    error_events = [e for e in events if e.get("type") == "session.error"]
+    assert error_events == [], (
+        f"a long stdout line must not produce session.error, got: {error_events}"
+    )
+    output_events = [e for e in events if e.get("type") == "agent.output"]
+    assert len(output_events) == 1, (
+        f"expected exactly one agent.output for the long line, got {len(output_events)}"
+    )
+    assert len(output_events[0]["line"]) == line_len, (
+        f"long line must be emitted intact: expected {line_len} chars, "
+        f"got {len(output_events[0]['line'])}"
+    )
+    idle_events = [e for e in events if e.get("type") == "session.status_idle"]
+    assert len(idle_events) == 1, (
+        f"expected session.status_idle after the long line, "
+        f"got types: {[e.get('type') for e in events]}"
+    )
 
 
 # ---------------------------------------------------------------------------
