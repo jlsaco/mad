@@ -26,6 +26,7 @@ class ClaudeCLIProvider:
         workspace: Path,
         emit: Callable[[str, dict | None], Coroutine[Any, Any, None]],
         model: str | None = None,
+        effort: str | None = None,
     ) -> None:
         executable = os.environ.get("MAD_CLAUDE_CLI_BIN") or shutil.which("claude")
         if not executable:
@@ -45,6 +46,8 @@ class ClaudeCLIProvider:
         args = [executable, "--dangerously-skip-permissions", "-p", prompt]
         if model is not None:
             args += ["--model", model]
+        if effort is not None:
+            args += ["--effort", effort]
 
         proc = await asyncio.create_subprocess_exec(
             *args,

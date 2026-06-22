@@ -19,6 +19,7 @@ class OpenCodeProvider:
         workspace: Path,
         emit: Callable[[str, dict | None], Coroutine[Any, Any, None]],
         model: str | None = None,
+        effort: str | None = None,
     ) -> None:
         executable = os.environ.get("MAD_OPENCODE_BIN") or shutil.which("opencode")
         if not executable:
@@ -38,6 +39,8 @@ class OpenCodeProvider:
         args = [executable, "run"]
         if model is not None:
             args += ["--model", model]
+        if effort is not None:
+            args += ["--variant", effort]
         args.append(prompt)
 
         proc = await asyncio.create_subprocess_exec(
