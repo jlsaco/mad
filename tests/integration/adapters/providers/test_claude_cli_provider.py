@@ -642,3 +642,71 @@ async def test_claude_cli_long_stdout_line_emitted_without_error(
         f"expected session.status_idle after the long line, "
         f"got types: {[e.get('type') for e in events]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# effort is passed as --effort <x> when set; absent when None (issue #60)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_effort_flag_present_when_effort_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``effort`` is provided, ``--effort <x>`` must appear in argv."""
+    marker = tmp_path / "argv.txt"
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        f"""\
+        import sys
+        open("{marker}", "w").write(" ".join(sys.argv))
+        print("done")
+        sys.exit(0)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    collected: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        collected.append(event)
+
+    await launcher.run(
+        session_id="s1", prompt="hello", workspace=tmp_path, emit=capture, effort="high"
+    )
+
+    argv_text = marker.read_text()
+    assert "--effort" in argv_text, f"Expected --effort in argv, got: {argv_text}"
+    assert "high" in argv_text, f"Expected effort value in argv, got: {argv_text}"
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_effort_flag_absent_when_effort_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative twin: when ``effort=None``, ``--effort`` must NOT appear in argv."""
+    marker = tmp_path / "argv.txt"
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_claude",
+        f"""\
+        import sys
+        open("{marker}", "w").write(" ".join(sys.argv))
+        print("done")
+        sys.exit(0)
+        """,
+    )
+    monkeypatch.setenv("MAD_CLAUDE_CLI_BIN", str(fake_bin))
+
+    launcher = ClaudeCLIProvider()
+    collected: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        collected.append(event)
+
+    await launcher.run(
+        session_id="s1", prompt="hello", workspace=tmp_path, emit=capture, effort=None
+    )
+
+    argv_text = marker.read_text()
+    assert "--effort" not in argv_text, f"Expected --effort absent from argv, got: {argv_text}"

@@ -24,6 +24,7 @@ from mad.core.events.emitter import EventEmitter
 from mad.core.events.ports.event_bus import EventBus
 from mad.core.events.ports.event_log_query import EventLogQuery
 from mad.core.orchestration.domain.deployment_policy import DeploymentDispatchPolicy
+from mad.core.orchestration.domain.effort_config import DeploymentEffortConfig
 from mad.core.orchestration.domain.model_config import DeploymentModelConfig
 from mad.core.orchestration.ports.clock import Clock
 from mad.core.orchestration.ports.model_catalog import ModelCatalog
@@ -44,6 +45,7 @@ def build_dependencies() -> tuple[
     DeploymentDispatchPolicy,
     ModelCatalog,
     DeploymentModelConfig,
+    DeploymentEffortConfig,
 ]:
     """Return the production defaults for every injected port."""
     store = SessionStore()
@@ -54,6 +56,7 @@ def build_dependencies() -> tuple[
     clock: Clock = SystemClock()
     deployment_policy = DeploymentDispatchPolicy()
     deployment_model_config = DeploymentModelConfig()
+    deployment_effort_config = DeploymentEffortConfig()
     return (
         store,
         repo,
@@ -66,6 +69,7 @@ def build_dependencies() -> tuple[
         deployment_policy,
         ModelCatalogAdapter(),
         deployment_model_config,
+        deployment_effort_config,
     )
 
 

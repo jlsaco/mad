@@ -41,6 +41,7 @@ class OpenCodeProvider:
         workspace: Path,
         emit: Callable[[str, dict | None], Coroutine[Any, Any, None]],
         model: str | None = None,
+        effort: str | None = None,
         conversation_id: str | None = None,
     ) -> str | None:
         executable = os.environ.get("MAD_OPENCODE_BIN") or shutil.which("opencode")
@@ -63,6 +64,8 @@ class OpenCodeProvider:
             args += ["--session", conversation_id]
         if model is not None:
             args += ["--model", model]
+        if effort is not None:
+            args += ["--variant", effort]
         args.append(prompt)
 
         proc = await asyncio.create_subprocess_exec(

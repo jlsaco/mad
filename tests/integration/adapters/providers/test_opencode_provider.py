@@ -433,6 +433,80 @@ async def test_opencode_ac7_model_flag_absent_when_model_is_none(
 
 
 # ---------------------------------------------------------------------------
+# effort → --variant flag; TWIN: effort=None → --variant absent (issue #60)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_opencode_variant_flag_present_when_effort_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When effort is provided, argv must contain 'run', '--variant', and the value."""
+    marker = tmp_path / "argv.txt"
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_opencode",
+        f"""\
+        import sys
+        open("{marker}", "w").write(" ".join(sys.argv))
+        print("done")
+        sys.exit(0)
+        """,
+    )
+    monkeypatch.setenv("MAD_OPENCODE_BIN", str(fake_bin))
+
+    launcher = OpenCodeProvider()
+    collected: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        collected.append(event)
+
+    await launcher.run(
+        session_id="s1",
+        prompt="hello",
+        workspace=tmp_path,
+        emit=capture,
+        effort="high",
+    )
+
+    argv_text = marker.read_text()
+    assert "run" in argv_text, f"Expected 'run' subcommand in argv, got: {argv_text}"
+    assert "--variant" in argv_text, f"Expected --variant in argv, got: {argv_text}"
+    assert "high" in argv_text, f"Expected effort value in argv, got: {argv_text}"
+
+
+@pytest.mark.asyncio
+async def test_opencode_variant_flag_absent_when_effort_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative twin: when effort=None, --variant must NOT appear in argv."""
+    marker = tmp_path / "argv.txt"
+    fake_bin = _make_executable_script(
+        tmp_path / "fake_opencode",
+        f"""\
+        import sys
+        open("{marker}", "w").write(" ".join(sys.argv))
+        print("done")
+        sys.exit(0)
+        """,
+    )
+    monkeypatch.setenv("MAD_OPENCODE_BIN", str(fake_bin))
+
+    launcher = OpenCodeProvider()
+    collected: list[dict] = []
+
+    async def capture(event_type: str, event: dict) -> None:
+        collected.append(event)
+
+    await launcher.run(
+        session_id="s1", prompt="hello", workspace=tmp_path, emit=capture, effort=None
+    )
+
+    argv_text = marker.read_text()
+    assert "run" in argv_text, f"Expected 'run' subcommand in argv, got: {argv_text}"
+    assert "--variant" not in argv_text, f"Expected --variant absent from argv, got: {argv_text}"
+
+
+# ---------------------------------------------------------------------------
 # AC-8: binary not found → single session.error "not found", no crash
 # ---------------------------------------------------------------------------
 

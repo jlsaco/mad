@@ -80,6 +80,7 @@ class ClaudeCLIProvider:
         workspace: Path,
         emit: Callable[[str, dict | None], Coroutine[Any, Any, None]],
         model: str | None = None,
+        effort: str | None = None,
         conversation_id: str | None = None,
     ) -> str | None:
         executable = os.environ.get("MAD_CLAUDE_CLI_BIN") or shutil.which("claude")
@@ -113,6 +114,8 @@ class ClaudeCLIProvider:
             args += ["--resume", conversation_id]
         if model is not None:
             args += ["--model", model]
+        if effort is not None:
+            args += ["--effort", effort]
 
         proc = await asyncio.create_subprocess_exec(
             *args,

@@ -20,6 +20,7 @@ from mad.core.events.ports.event_bus import EventBus
 from mad.core.events.ports.event_log_query import EventLogQuery
 from mad.core.orchestration.domain.deployment_policy import DeploymentDispatchPolicy
 from mad.core.orchestration.domain.dispatch_policy import InvalidDispatchPolicy
+from mad.core.orchestration.domain.effort_config import DeploymentEffortConfig
 from mad.core.orchestration.domain.exceptions.base import (
     SessionHasInFlightTask,
     TaskAlreadyDispatched,
@@ -31,6 +32,9 @@ from mad.core.orchestration.ports.clock import Clock
 from mad.core.orchestration.ports.model_catalog import ModelCatalog
 from mad.core.orchestration.use_cases.deployment_dispatch_policy import (
     bootstrap_deployment_policy,
+)
+from mad.core.orchestration.use_cases.deployment_effort_config import (
+    bootstrap_deployment_effort_config,
 )
 from mad.core.orchestration.use_cases.deployment_model_config import (
     bootstrap_deployment_model_config,
@@ -63,6 +67,7 @@ def create_app(
     deployment_policy: DeploymentDispatchPolicy | None = None,
     model_catalog: ModelCatalog | None = None,
     deployment_model_config: DeploymentModelConfig | None = None,
+    deployment_effort_config: DeploymentEffortConfig | None = None,
 ) -> FastAPI:
     """Build a FastAPI app with injected dependencies."""
 
@@ -78,6 +83,7 @@ def create_app(
         _default_deployment_policy,
         _default_model_catalog,
         _default_deployment_model_config,
+        _default_deployment_effort_config,
     ) = build_dependencies()
 
     final_store = store if store is not None else _default_store
@@ -117,6 +123,11 @@ def create_app(
         if deployment_model_config is not None
         else _default_deployment_model_config
     )
+    final_deployment_effort_config: DeploymentEffortConfig = (
+        deployment_effort_config
+        if deployment_effort_config is not None
+        else _default_deployment_effort_config
+    )
 
     if dispatcher is not None:
         final_dispatcher = dispatcher
@@ -130,6 +141,7 @@ def create_app(
             "clock": final_clock,
             "deployment_policy": final_deployment_policy,
             "deployment_model_config": final_deployment_model_config,
+            "deployment_effort_config": final_deployment_effort_config,
         }
         if dispatcher_tick_interval_s is not None:
             dispatcher_kwargs["tick_interval_s"] = dispatcher_tick_interval_s
@@ -155,6 +167,7 @@ def create_app(
         clock=final_clock,
         model_catalog=final_model_catalog,
         deployment_model_config=final_deployment_model_config,
+        deployment_effort_config=final_deployment_effort_config,
     )
     mcp_asgi_app = mcp_server.streamable_http_app()
 
@@ -176,6 +189,9 @@ def create_app(
         # Rebuild the deployment-wide model default from its reserved log
         # (issue #55, hard rule 6).
         bootstrap_deployment_model_config(final_deployment_model_config, final_repo)
+        # Rebuild the deployment-wide effort default from its reserved log
+        # (issue #60, hard rule 6).
+        bootstrap_deployment_effort_config(final_deployment_effort_config, final_repo)
         await final_dispatcher.start()
         async with mcp_server.session_manager.run():
             try:
@@ -197,6 +213,7 @@ def create_app(
     app.state.deployment_policy = final_deployment_policy
     app.state.model_catalog = final_model_catalog
     app.state.deployment_model_config = final_deployment_model_config
+    app.state.deployment_effort_config = final_deployment_effort_config
     app.state.mcp_server = mcp_server
 
     @app.exception_handler(PathTraversalError)
