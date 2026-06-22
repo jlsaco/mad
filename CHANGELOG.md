@@ -1,6 +1,16 @@
 # CHANGELOG
 
 
+## v0.5.17 (2026-06-22)
+
+### Features
+
+- **agents**: Agent-agnostic timeout with per-session override
+  ([`b1b2eb5`](https://github.com/jlsaco/mad/commit/b1b2eb5aa24def5a727a51f467b969d337bbe522))
+- **config**: Make sessions log directory configurable via MAD_SESSIONS_DIR
+  ([`ef7a2a2`](https://github.com/jlsaco/mad/commit/ef7a2a2fc4e265bc1a8996e684f4bc0a2b41e69d))
+
+
 ## v0.5.16 (2026-06-22)
 
 
