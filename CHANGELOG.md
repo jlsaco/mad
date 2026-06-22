@@ -1,6 +1,9 @@
 # CHANGELOG
 
 
+## v0.5.16 (2026-06-22)
+
+
 ## v0.5.15 (2026-06-21)
 
 ### Bug Fixes
@@ -45,8 +48,12 @@
 
 - **agents**: Capture conversation ID from claude_cli and opencode
   ([`8c1b5de`](https://github.com/jlsaco/mad/commit/8c1b5de878589fe8646ddac1e10e07b1827f6fcf))
+- **agents**: Forward reasoning effort to claude and opencode CLIs
+  ([`302ab9a`](https://github.com/jlsaco/mad/commit/302ab9a7dd25b8c07bb33af6cb068ea50a2d7e17))
 - **http**: Expose conversation_mode on tasks and last_conversation_id on sessions
   ([`643ac42`](https://github.com/jlsaco/mad/commit/643ac42a5184db6bdfaebab897f030e5b2058421))
+- **http**: Select reasoning effort per session with a deployment default
+  ([`c6d5c47`](https://github.com/jlsaco/mad/commit/c6d5c47fc46fe7940b00d22f304b90a140d26b2f))
 
 
 ## v0.5.11 (2026-06-21)
