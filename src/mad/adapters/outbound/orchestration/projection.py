@@ -32,6 +32,7 @@ from mad.core.orchestration.ports.task_queue import RetryInfo
 _TASK_QUEUED = "task.queued"
 _TASK_DISPATCHED = "task.dispatched"
 _TASK_RETRYING = "task.retrying"
+_TASK_DEFERRED = "task.deferred"
 _TERMINAL_TYPES = frozenset({"task.completed", "task.failed", "task.cancelled"})
 
 # Bootstrap limit. EventLogQuery loads sessions/*.jsonl into memory;
@@ -83,6 +84,8 @@ class InMemoryTaskProjection:
             self._on_dispatched(event)
         elif event.type == _TASK_RETRYING:
             self._on_retrying(event)
+        elif event.type == _TASK_DEFERRED:
+            self._on_deferred(event)
         elif event.type in _TERMINAL_TYPES:
             self._on_terminal(event)
 
@@ -121,6 +124,24 @@ class InMemoryTaskProjection:
             retry_after_s=event.data["retry_after_s"],
             reason=event.data["reason"],
         )
+
+    def _on_deferred(self, event: Event) -> None:
+        """Move a deferred task from in-flight back to the queue (issue #79).
+
+        A rate-limited retry whose next attempt would fall outside the
+        session's work window is returned to the queue rather than run
+        outside the window. The original ``Task`` is preserved (so
+        ``created_at`` / FIFO / priority ordering stays intact) and
+        reinserted at the head of the queue; ``retry_info`` is cleared. If
+        the task is not the current in-flight one (should not happen in
+        normal flow), this is a no-op.
+        """
+        task_id = UUID(event.data["task_id"])
+        in_flight = self._in_flight.get(event.session_id)
+        if in_flight is not None and in_flight.task_id == task_id:
+            del self._in_flight[event.session_id]
+            self._retry_info.pop(event.session_id, None)
+            self._queued[event.session_id].insert(0, in_flight)
 
     def _on_terminal(self, event: Event) -> None:
         task_id = UUID(event.data["task_id"])

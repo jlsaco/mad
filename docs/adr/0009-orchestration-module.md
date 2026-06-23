@@ -55,6 +55,7 @@ The event types this module emits, verbatim per ADR-0004:
 | `task.completed` | The launcher run for a dispatched task reaches `session.status_idle`. | `{task_id}` |
 | `task.cancelled` | A queued task is removed via `DELETE /v1/sessions/{id}/tasks/{task_id}`. | `{task_id, reason}` |
 | `task.failed` | A dispatched task's launcher run reaches `session.error`, OR the dispatcher detects an interrupted-mid-flight task on startup recovery. | `{task_id, reason}` |
+| `task.deferred` | A dispatched task hits a rate limit and its next retry attempt would fall outside the session's `work_window`; the dispatcher returns it to the queue instead of relaunching outside the window (issue #79). | `{task_id, reason, scheduled_for}` |
 
 `task_id` is a UUIDv4 minted at enqueue time. Per-task `event_id` is still UUIDv7 (ADR-0005); the two are independent.
 
@@ -165,6 +166,16 @@ The Clock port from §8 lands its consumers. Three policies on `Session.dispatch
 **Known consequence — starvation (deliberate, not solved).** One dispatcher (§4) plus strict priority means a high-priority session receiving a continuous stream of tasks indefinitely starves lower-priority sessions. Accepted for a single-operator tool; there is **no fairness or aging mechanism in v1**. Revisit alongside cross-session parallelism if multi-tenant or multi-operator use makes starvation a practical problem.
 
 **Interaction with §10 (effective policy).** Eligibility, the `ready`/`scheduled` partition, and the `scheduled` reasons are all computed against the *effective* policy (`resolve_effective_policy(session, deployment)`), exactly as the dispatcher evaluates it — the queue view and the dispatcher share both the ordering function and the policy resolution, so they can never disagree about what dispatches next or why a task is gated.
+
+### 12. Rate-limit retry respects the work window (amendment, 2026-06-22 — issue #79)
+
+§9's `work_window` gate is evaluated only at dispatch. §-issue #62's rate-limit retry loop (`Dispatcher._run_task`) then held the in-flight slot and relaunched `launcher.run()` across a multi-hour exponential backoff **without re-evaluating the policy** — so a task that hit its quota near the window edge could resume and run a fresh agent process entirely outside the window. This is the "half-open windows" follow-up #33 named as a future ADR.
+
+**A retry is a new start.** During backoff nothing is running; relaunching the agent is a new dispatch, not "running to completion." So the retry must pass the same gate as the initial dispatch. In the `RateLimitError` branch the dispatcher checks `_window_closed(session)` — the effective policy is a `WorkWindowPolicy` and `is_open(clock.now())` is false — at two points: once before the backoff sleep (the run itself may have overrun the window edge) and again immediately after it, at the instant it would relaunch. If the window is closed at either point, the task is **deferred** instead of relaunched. The check is deliberately on the *current* instant, not a predicted `now + delay` wake time: deferring re-queues the task, and re-queueing while the window is still open would let the dispatcher (its `finally` and the 30 s tick) re-dispatch it at once — straight back into the rate limit, a livelock. Deferring only once the window is actually shut means the re-queued task stays gated until the next opening.
+
+**`task.deferred`.** Deferral emits `task.deferred {task_id, reason: "work_window_closed", scheduled_for}` (`scheduled_for` = next window opening as ISO 8601, or null). The projection moves the task from `in_flight` back to the head of `queued`, preserving the original `Task` (so `created_at` / priority / FIFO ordering is intact) and clearing `retry_info`. The task then reappears in `GET /v1/queue`'s `scheduled` bucket with reason `window`, and re-dispatches when the window next opens (the periodic tick picks it up). `_run_task` returns, so its `finally` frees the single global in-flight slot — other sessions are no longer starved for the remainder of the closed window (a partial mitigation of the §4 single-dispatch hold during long backoffs).
+
+**Scope.** Only `WorkWindowPolicy` defers. `ImmediatePolicy` (always open) and `ManualPolicy` retain the exact pre-#79 retry behavior, as does the no-clock legacy test harness (`self._clock is None`). The per-dispatch 5 h cumulative ceiling is unchanged and still bounds an in-window retry chain; the ceiling resets when a deferred task re-dispatches in a later window. Bounding a normal (non-rate-limited) run's duration to the window edge, and re-gating `manual` triggers, remain out of scope.
 
 ## Consequences
 
