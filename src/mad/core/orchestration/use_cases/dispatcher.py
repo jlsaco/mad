@@ -51,6 +51,7 @@ from mad.core.orchestration.domain.deployment_policy import (
 )
 from mad.core.orchestration.domain.dispatch_policy import (
     ImmediatePolicy,
+    WorkWindowPolicy,
     can_dispatch,
     next_window_opening,
 )
@@ -295,6 +296,40 @@ class Dispatcher:
         opening = next_window_opening(policy, self._clock.now())
         return opening.isoformat() if opening is not None else None
 
+    def _window_closed(self, session: Session) -> bool:
+        """True iff the session's effective policy is a ``WorkWindowPolicy``
+        that is closed at the current instant (issue #79).
+
+        Returns False when no clock is wired (legacy test harness) or the
+        effective policy is ``Immediate`` / ``Manual`` — those keep the
+        pre-#79 rate-limit retry behavior unchanged.
+        """
+        if self._clock is None:
+            return False
+        policy = resolve_effective_policy(session, self._deployment_policy)
+        return isinstance(policy, WorkWindowPolicy) and not policy.is_open(self._clock.now())
+
+    async def _defer_to_window(self, task: Task) -> None:
+        """Return a rate-limited task to the queue instead of relaunching it
+        outside its work window (issue #79).
+
+        Emits ``task.deferred`` so the projection moves the task from
+        ``in_flight`` back to ``queued`` (where ``GET /v1/queue``'s
+        ``scheduled`` bucket surfaces it) and the SSE stream observes the
+        deferral. ``_run_task``'s ``finally`` then frees the global
+        in-flight slot so other sessions can dispatch during the wait.
+        """
+        scheduled_for = self._next_window_opening_iso(task.session_id)
+        await self._emitter.emit(
+            task.session_id,
+            "task.deferred",
+            {
+                "task_id": str(task.task_id),
+                "reason": "work_window_closed",
+                "scheduled_for": scheduled_for,
+            },
+        )
+
     async def _run_task(self, task: Task) -> None:
         """Drive the launcher for one task, then emit task.completed/failed.
 
@@ -375,6 +410,22 @@ class Dispatcher:
                         and rl_exc.retry_after_floor_s > delay
                     ):
                         delay = rl_exc.retry_after_floor_s
+
+                    # Window re-gate, part 1 (issue #79): a retry is a fresh
+                    # agent launch, so it must pass the same work-window gate as
+                    # the initial dispatch. If a WorkWindowPolicy has already
+                    # closed (the run itself overran the window edge), defer the
+                    # task back to the queue now rather than wait to relaunch
+                    # outside the window. Deferring only while the window is shut
+                    # is what avoids a livelock: re-queueing into a still-open
+                    # window would be re-dispatched immediately. The finally
+                    # frees the in-flight slot and the task re-dispatches at the
+                    # next opening. Immediate/Manual policies and the no-clock
+                    # legacy harness keep the existing retry behavior.
+                    if self._window_closed(session):
+                        await self._defer_to_window(task)
+                        return
+
                     cumulative_wait_s += delay
 
                     if exceeds_ceiling(cumulative_wait_s):
@@ -402,6 +453,18 @@ class Dispatcher:
                     # _in_flight remains set — no other tasks are dispatched
                     # during the backoff sleep.
                     await asyncio.sleep(delay)
+
+                    # Window re-gate, part 2 (issue #79): if the window closed
+                    # *during* the backoff sleep, defer instead of relaunching
+                    # outside it. Checking here — at the instant we would
+                    # relaunch — rather than before the sleep on a predicted
+                    # wake time, keeps the defer safe: the window is actually
+                    # shut by now, so the re-queued task is not immediately
+                    # re-dispatched into a still-open window.
+                    if self._window_closed(session):
+                        await self._defer_to_window(task)
+                        return
+
                     # Subsequent attempts always resume the conversation.
                     current_conversation_mode = "resume"
                     continue

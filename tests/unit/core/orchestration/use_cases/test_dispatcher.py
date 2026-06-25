@@ -37,6 +37,7 @@ from mad.core.orchestration.domain.dispatch_policy import (
     Window,
     WorkWindowPolicy,
 )
+from mad.core.orchestration.domain.exceptions.rate_limit import RateLimitError
 from mad.core.orchestration.domain.task import Task
 from mad.core.orchestration.use_cases.dispatcher import Dispatcher
 from mad.core.orchestration.use_cases.enqueue_task import (
@@ -604,3 +605,139 @@ async def test_no_override_and_no_deployment_default_behaves_as_immediate(
         assert launcher.calls != []
     finally:
         await h.stop()
+
+
+# -- Rate-limit retry x work window (issue #79) -------------------------------
+
+
+def _force_fast_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse the exponential schedule to ~0 s so only an explicit
+    rate-limit floor governs the sleep — keeps these tests fast."""
+    import mad.core.orchestration.domain.retry_schedule as sched
+
+    monkeypatch.setattr(sched, "_BASE_S", 0.01)
+    monkeypatch.setattr(sched, "_JITTER_FRACTION", 0.0)
+    monkeypatch.setattr(sched, "_MIN_BACKOFF_S", 0.0)
+
+
+async def test_rate_limit_retry_defers_when_window_closes_during_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #79: a retry is a fresh launch, so it must pass the work-window
+    gate. The run starts inside the window, rate-limits, and the window closes
+    during the backoff sleep — the dispatcher MUST emit ``task.deferred`` and
+    return the task to the queue instead of relaunching the agent outside the
+    window. The single scripted run is the regression guard: a second launcher
+    call would mean a relaunch outside the window."""
+    _force_fast_backoff(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    session = _session("sesn_a", workspace)
+    session.dispatch_policy = WorkWindowPolicy(
+        windows=(Window(start=dtime(18, 0), end=dtime(8, 0), timezone=_MEX),)
+    )
+    sessions = {"sesn_a": session}
+    launcher = ScriptedLauncher()
+    launcher.script_raising(
+        [RateLimitError(captured_id=None, reason="rate_limit", retry_after_floor_s=0.3)]
+    )
+    clock = FakeClock(_at(2026, 5, 9, 22, 0))  # inside the 18:00->08:00 window
+    h = _Harness(sessions, launcher, clock=clock)
+    await h.start()
+    try:
+        await h.enqueue.execute(EnqueueTaskInput(session_id="sesn_a", content="overnight"))
+        # task.retrying is emitted right before the backoff sleep — close the
+        # window then, so the post-sleep re-gate sees a shut window.
+        await _wait_for_event_type(h.store, session_id="sesn_a", event_type="task.retrying")
+        clock.set(_at(2026, 5, 10, 12, 0))  # next-day midday — window shut
+        await _wait_for_event_type(h.store, session_id="sesn_a", event_type="task.deferred")
+
+        deferred = next(c for c in h.store.calls if c[1] == "task.deferred")
+        assert deferred[2]["reason"] == "work_window_closed"
+        # Exactly one launch — the agent did NOT relaunch outside the window.
+        assert len(launcher.calls) == 1
+        # No terminal completion/failure — the task returned to the queue.
+        assert not any(c for c in h.store.calls if c[1] == "task.completed")
+        assert not any(c for c in h.store.calls if c[1] == "task.failed")
+        # Projection moved it from in_flight back to the queue.
+        assert h.projection.in_flight("sesn_a") is None
+        requeued = h.projection.queued("sesn_a")
+        assert [str(t.task_id) for t in requeued] == [deferred[2]["task_id"]]
+    finally:
+        await h.stop()
+
+
+async def test_rate_limit_retry_stays_in_flight_when_window_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative twin: the window stays open across the whole retry, so the
+    rate limit is retried normally and the task completes — no ``task.deferred``.
+    Proves the defer fires *because the window closed*, not on every rate
+    limit under a ``WorkWindowPolicy``."""
+    _force_fast_backoff(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    session = _session("sesn_a", workspace)
+    session.dispatch_policy = WorkWindowPolicy(
+        windows=(Window(start=dtime(18, 0), end=dtime(8, 0), timezone=_MEX),)
+    )
+    sessions = {"sesn_a": session}
+    launcher = ScriptedLauncher()
+    launcher.script_raising(
+        [
+            RateLimitError(captured_id=None, reason="rate_limit"),
+            ([{"type": "session.status_idle", "stop_reason": "end_turn"}], None),
+            ([{"type": "session.status_idle", "stop_reason": "end_turn"}], None),
+        ]
+    )
+    clock = FakeClock(_at(2026, 5, 9, 22, 0))  # inside window, never advanced
+    h = _Harness(sessions, launcher, clock=clock)
+    await h.start()
+    try:
+        await h.enqueue.execute(EnqueueTaskInput(session_id="sesn_a", content="overnight"))
+        await _wait_for_event_type(h.store, session_id="sesn_a", event_type="task.retrying")
+        await _wait_for_event_type(h.store, session_id="sesn_a", event_type="task.completed")
+        assert not any(c for c in h.store.calls if c[1] == "task.deferred")
+    finally:
+        await h.stop()
+
+
+def test_window_closed_true_when_work_window_shut(tmp_path: Path) -> None:
+    """``Dispatcher._window_closed`` is True when the effective policy is a
+    WorkWindowPolicy whose window is shut at the current instant."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    session = _session("sesn_a", workspace)
+    session.dispatch_policy = WorkWindowPolicy(
+        windows=(Window(start=dtime(18, 0), end=dtime(8, 0), timezone=_MEX),)
+    )
+    h = _Harness({"sesn_a": session}, ScriptedLauncher(), clock=FakeClock(_at(2026, 5, 9, 12, 0)))
+    assert h.dispatcher._window_closed(session) is True
+
+
+def test_window_closed_false_when_open_or_non_window_or_no_clock(tmp_path: Path) -> None:
+    """Negative twin of ``test_window_closed_true_*``: False for an open
+    window, for a non-window policy (Immediate) even with a clock wired, and
+    for a dispatcher with no clock (the legacy harness keeps pre-#79 behavior)."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    window = WorkWindowPolicy(windows=(Window(start=dtime(18, 0), end=dtime(8, 0), timezone=_MEX),))
+
+    open_session = _session("sesn_a", workspace)
+    open_session.dispatch_policy = window
+    h_open = _Harness(
+        {"sesn_a": open_session}, ScriptedLauncher(), clock=FakeClock(_at(2026, 5, 9, 22, 0))
+    )
+    assert h_open.dispatcher._window_closed(open_session) is False
+
+    imm_session = _session("sesn_b", workspace)
+    imm_session.dispatch_policy = ImmediatePolicy()
+    h_imm = _Harness(
+        {"sesn_b": imm_session}, ScriptedLauncher(), clock=FakeClock(_at(2026, 5, 9, 12, 0))
+    )
+    assert h_imm.dispatcher._window_closed(imm_session) is False
+
+    noclock_session = _session("sesn_c", workspace)
+    noclock_session.dispatch_policy = window
+    h_noclock = _Harness({"sesn_c": noclock_session}, ScriptedLauncher())  # clock=None
+    assert h_noclock.dispatcher._window_closed(noclock_session) is False
