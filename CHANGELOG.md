@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.5.19 (2026-06-25)
+
+### Bug Fixes
+
+- **agents**: Defer rate-limit retry when work window closes
+  ([`7c7b3a0`](https://github.com/jlsaco/mad/commit/7c7b3a05edd4da63a91b1ebab967400d6f3dc799))
+
+
 ## v0.5.18 (2026-06-22)
 
 ### Bug Fixes
