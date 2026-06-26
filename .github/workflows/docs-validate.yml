@@ -1,13 +1,15 @@
 name: Docs validate
 
 # Thin caller for the shared reusable workflow in mad-core/.github.
-# The trigger lives here; the docs quality-gate logic lives in the reusable.
+# The trigger lives here; the docs structure linter lives in the reusable.
+# Lint-only gate — docs are NOT auto-generated in CI (update /docs locally
+# via the living-docs skill/commands).
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 jobs:
@@ -15,6 +17,3 @@ jobs:
     uses: mad-core/.github/.github/workflows/docs-validate.reusable.yml@main
     with:
       service_slug: mad
-    secrets:
-      DOCS_SYNC_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
