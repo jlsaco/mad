@@ -1,0 +1,19 @@
+name: Docs validate
+
+# Thin caller for the shared reusable workflow in mad-core/.github.
+# The trigger lives here; the docs structure linter lives in the reusable.
+# Lint-only gate — docs are NOT auto-generated in CI (update /docs locally
+# via the living-docs skill/commands).
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  docs-validate:
+    uses: mad-core/.github/.github/workflows/docs-validate.reusable.yml@main
+    with:
+      service_slug: mad
