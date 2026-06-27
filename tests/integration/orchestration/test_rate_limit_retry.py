@@ -392,7 +392,8 @@ async def test_auto_sync_rate_limit_does_not_rerun_primary(
         # presence and value asserted on the same extracted event.
         rl = next(
             (
-                c for c in h.store.calls
+                c
+                for c in h.store.calls
                 if c[0] == "sesn_as" and c[1] == "agent.autosync.rate_limited"
             ),
             None,
