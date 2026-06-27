@@ -1,7 +1,7 @@
 ---
 service: mad
 domain: backend
-section: Architecture
+section: architecture
 source_of_truth: repo
 ---
 

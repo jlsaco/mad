@@ -1,7 +1,7 @@
 ---
 service: mad
 domain: backend
-section: Operations
+section: operations
 source_of_truth: repo
 ---
 

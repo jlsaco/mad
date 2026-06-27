@@ -1,7 +1,7 @@
 ---
 service: mad
 domain: backend
-section: API
+section: contracts
 source_of_truth: repo
 ---
 
