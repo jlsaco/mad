@@ -26,7 +26,7 @@ docs:
       discovery_hint: "The service entrypoints and the top-level package layout — where the application is wired together (handlers, app factory, package roots)."
       hint: "Re-validate when the service's responsibilities or external boundaries change; this is intent, not code, so it is checked by age, not diff."
       max_age_days: 180
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/02-architecture/architecture.md
     section: Architecture
     kind: heuristic
@@ -42,7 +42,7 @@ docs:
         - src/mad/adapters/**
       discovery_hint: "The business-core layer and the adapter/infrastructure layer — the directories that hold use cases / domain logic and those that hold inbound/outbound integrations."
       hint: "Fires when the core or adapter layers move or are restructured."
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/02-architecture/source-tree.md
     section: Architecture
     kind: deterministic
@@ -62,7 +62,7 @@ docs:
         root:
           description: Repo-relative path to the application source root.
           default: src
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/02-architecture/test-tree.md
     section: Architecture
     kind: deterministic
@@ -81,10 +81,14 @@ docs:
         root:
           description: Repo-relative path to the test root.
           default: tests
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
+  # `api` is heuristic, not deterministic: regenerating the OpenAPI dump needs the
+  # app imported (mad + mcp + fastapi), but the shared docs-validate CI installs only
+  # `gen_docs`, not this package, so it cannot regenerate this doc and would raise a
+  # false deterministic-stale. Regenerate LOCALLY with `gen_docs api` (see `produces`).
   - path: docs/03-api/api-reference.md
     section: API
-    kind: deterministic
+    kind: heuristic
     description: |
       The HTTP API surface dumped from the application object as an OpenAPI
       spec — routes, methods, schemas. Runs only if the repo declares an app
@@ -93,6 +97,7 @@ docs:
       paths:
         - src/mad/adapters/inbound/http/**
       discovery_hint: "The module that builds/exposes the web application object (e.g. a FastAPI/Flask/Starlette app factory or instance)."
+      hint: "Re-run `gen_docs api` locally and re-ack when the HTTP routes or their request/response models change."
     produces:
       type: script
       command: [gen_docs, api]
@@ -104,7 +109,7 @@ docs:
           description: Importable module path holding the app object (e.g. `src.adapters.inbound.http.app`). Stack-specific — no default.
         app_attr:
           description: Attribute name of the app object within that module (e.g. `app`).
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/03-data/data-model.md
     section: Data
     kind: heuristic
@@ -120,7 +125,7 @@ docs:
         - src/mad/adapters/outbound/persistence/**
       discovery_hint: "The domain entities/models and the persistence layer (repositories, schema/migration definitions, table or collection declarations)."
       hint: "Fires when domain models, migrations, or repository contracts change."
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/04-configuration/configuration.md
     section: Configuration
     kind: heuristic
@@ -141,7 +146,7 @@ docs:
         - src/mad/adapters/outbound/agents/**
       discovery_hint: "The settings/configuration surface — where environment variables are declared, parsed, and read. No central settings class exists here; the surface is `.env.example` plus the os.environ/os.getenv reads across adapters."
       hint: "Fires when an environment variable is added, dropped, or renamed — in `.env.example` or in a module that reads it."
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/05-operations/ci-cd.md
     section: Operations
     kind: heuristic
@@ -163,7 +168,7 @@ docs:
         workflows_dir:
           description: Repo-relative path to the CI/CD workflows directory.
           default: .github/workflows
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/05-operations/scripts.md
     section: Operations
     kind: deterministic
@@ -187,7 +192,7 @@ docs:
         scripts_dir:
           description: Repo-relative path to the standalone scripts directory.
           default: scripts
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
   - path: docs/06-changelog/changelog.md
     section: Changelog
     kind: heuristic
@@ -203,5 +208,5 @@ docs:
         - CHANGELOG.md
       discovery_hint: "The package's released changelog — `CHANGELOG.md` at the repo root, generated by python-semantic-release (`[tool.semantic_release]` in pyproject.toml)."
       hint: "Fires when `CHANGELOG.md` changes — i.e. a new release is cut."
-    acknowledged_at_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
+    acknowledged_at_commit: 617c4b670c73e4a35490d896ad1bb6d567b87c38
 bootstrap_commit: 7e3be29825257201e8b6cc0155d063d834dadbbb
