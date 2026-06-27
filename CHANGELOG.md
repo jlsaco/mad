@@ -1,6 +1,9 @@
 # CHANGELOG
 
 
+## v0.5.25 (2026-06-27)
+
+
 ## v0.5.24 (2026-06-27)
 
 ### Features
@@ -39,6 +42,11 @@
 
 - **agents**: Don't re-run primary when auto-sync hits a rate limit
   ([`099e099`](https://github.com/mad-core/mad/commit/099e099eaa96a8adbecf5a086b43f5031ca773c6))
+
+### Features
+
+- **http**: Expose importable ASGI application instance
+  ([`9e0518e`](https://github.com/mad-core/mad/commit/9e0518ebe1017e3d33a407a85ca3486c420c26b5))
 
 
 ## v0.5.19 (2026-06-25)
