@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.5.24 (2026-06-27)
+
+### Features
+
+- **http**: Add POST/GET /v1/workflows for session chaining
+  ([`54a3485`](https://github.com/mad-core/mad/commit/54a34851e2366de4f563152a03be6fafb9da0c09))
+
+
 ## v0.5.23 (2026-06-27)
 
 ### Features
