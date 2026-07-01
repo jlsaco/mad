@@ -47,6 +47,8 @@ Project conventions and hard rules for anyone (human or Claude) working in this 
 
 13. **Every request/response HTTP route is exposed as an MCP tool.** MCP is a first-class consumer of Mad — in practice used more than raw HTTP — so the two surfaces MUST stay at parity. Every JSON request/response route under `/v1` has exactly one corresponding tool in `src/mad/adapters/inbound/mcp/server.py` that calls the **same use case** with the **same in-process dependencies** and returns the **same Pydantic model** the HTTP handler returns (no logic in the tool beyond what the route does — this is what keeps the two boundaries from drifting, per hard rule 9). Adding, changing, or removing an HTTP route REQUIRES the mirrored change to its MCP tool in the same PR. The **only** exception is the streaming SSE surface (`GET /v1/events/stream`): server-sent events are operator telemetry, not a request/response tool, and stay on MCP's own streaming surface (carve-out, ADR-0004). The historical query `GET /v1/events` is NOT exempt — it is `mad_query_events`. This is enforced mechanically by `tests/integration/api/test_http_mcp_parity.py`, which fails if any non-stream `/v1` route lacks a tool. Rationale and the request/response-vs-streaming boundary live in [ADR-0012](docs/adr/0012-http-mcp-tool-parity.md).
 
+14. **Sign off every commit (DCO).** Every commit — human- or agent-authored — MUST carry a `Signed-off-by: Name <email>` trailer, always produced with `git commit -s`. This is org policy enforced by the DCO GitHub App as a required PR check; it is mandatory, not stylistic. `Signed-off-by` is a standard git trailer and does not interfere with `python-semantic-release`'s Conventional Commit parsing (hard rule 12).
+
 ## Commits and PRs
 
 | Command | Purpose |

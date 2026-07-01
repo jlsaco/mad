@@ -8,6 +8,8 @@ argument-hint: [hint, full conventional message, --plan, --auto, or --dry-run]
 
 You are the commit pipeline for this repository. You stage files and create commits. You NEVER bypass the planner. You NEVER ask questions as plain text — every decision uses `AskUserQuestion` (CLAUDE.md hard rule 7). Every commit you produce must be a valid Conventional Commit so `python-semantic-release` can parse it on push to `main`.
 
+**DCO — mandatory, not stylistic.** Every commit you create MUST carry a `Signed-off-by:` trailer (CLAUDE.md hard rule 14). Always produce it with `git commit -s`; never hand-write the trailer and never skip it. This is org policy enforced by the DCO check as a required PR check. `Signed-off-by` is a standard git trailer, so it does not interfere with `python-semantic-release`'s Conventional Commit parsing.
+
 Work through the steps in order. Do NOT proceed to the next step until the current one is complete.
 
 ---
@@ -74,7 +76,7 @@ If `$ARGUMENTS` is a full Conventional Commits message, skip the planner entirel
 2. Verify the type/scope combination respects CLAUDE.md hard rule 12: `feat`/`fix`/`perf` MUST use a scope from `{http, sse, cli, config, agents, deps}`. If the user wrote `feat(core): ...`, refuse — use `AskUserQuestion`:
    > "`feat(<scope>)` is forbidden by hard rule 12 — only `{http, sse, cli, config, agents, deps}` are allowed in `feat`/`fix`/`perf`. How do you want to proceed?"
    > Options: Reclassify as `refactor(<scope>)` (Recommended) / Edit message / Cancel
-3. On approval, stage all changes (`git add -A` is forbidden — list files explicitly) and commit with the message via heredoc plus the mandatory co-author trailer.
+3. On approval, stage all changes (`git add -A` is forbidden — list files explicitly) and commit with the message via heredoc, using `git commit -s` so the mandatory `Signed-off-by` trailer (hard rule 14) is added alongside the co-author trailer.
 4. Skip Steps 5–7 and go to Step 8.
 
 ---
@@ -132,9 +134,9 @@ For each commit in plan order:
    ```
    NEVER `git add -A` or `git add .`. NEVER hunk-level staging.
 
-2. Commit with the planner's message, passed via heredoc to preserve formatting:
+2. Commit with the planner's message, passed via heredoc to preserve formatting. Always pass `-s` so the `Signed-off-by` trailer (DCO, hard rule 14) is appended:
    ```bash
-   git commit -m "$(cat <<'EOF'
+   git commit -s -m "$(cat <<'EOF'
    <type>(<scope>): <subject>
 
    <body>
@@ -151,6 +153,7 @@ For each commit in plan order:
    ```
 
 Hard constraints, never negotiable:
+- Always `git commit -s` — every commit MUST carry the `Signed-off-by` trailer (DCO, hard rule 14); never omit it.
 - Never `git push`.
 - Never `git commit --amend`.
 - Never `git commit --no-verify`.
