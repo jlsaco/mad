@@ -121,6 +121,7 @@ For each commit, build:
   - `Closes #<issue_number>` on the LAST commit in the bisect order, only if `issue_number` is non-empty.
   - `BREAKING CHANGE: <impact + migration>` on any breaking commit (matching the `!` marker).
   - Mandatory on every commit: `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` (this exact wording — matches `dbaa6f0`, `a7b74f3`, `5c66d3e`).
+  - Do NOT emit a `Signed-off-by:` trailer yourself. The parent adds the mandatory DCO sign-off at commit time via `git commit -s` (CLAUDE.md hard rule 14), so every executed commit carries it — your message body must not duplicate it.
 
 ## Output format
 
